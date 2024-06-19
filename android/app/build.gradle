@@ -1,6 +1,5 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
-apply plugin: 'kotlin-android-extensions'
 apply plugin: 'kotlin-kapt'
 apply plugin: 'com.chaquo.python'
 
@@ -11,17 +10,18 @@ def STRINGS_DIR = "$GENERATED_DIR/strings"
 def REQUIREMENTS_TXT = "$GENERATED_DIR/requirements.txt"
 
 android {
+    namespace 'org.oregano.oregano3'
     compileOptions {
         // Required by ACRA.
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
-    compileSdkVersion 29
+    compileSdkVersion 34
 
     defaultConfig {
         applicationId "org.oregano.wallet"
-        minSdkVersion 18
-        targetSdkVersion 29
+        minSdkVersion 21
+        targetSdkVersion 34
 
         def ecVersion = null
         file("$REPO_ROOT/oregano/version.py").eachLine {
@@ -33,7 +33,7 @@ android {
         if (ecVersion == null) {
             throw new GradleException("Couldn't find version number")
         }
-        def BUILD_NUM = 3  // Distinguish multiple releases with the same version number.
+        def BUILD_NUM = 1 // Distinguish multiple releases with the same version number.
         versionName "$ecVersion-$BUILD_NUM"
         def verParsed = ecVersion.split(/\./).collect { Integer.parseInt(it) }
         versionCode((verParsed[0] * 1000000) + (verParsed[1] * 10000) + (verParsed[2] * 100) +
@@ -63,10 +63,11 @@ android {
         main {
             python {
                 srcDir REPO_ROOT
-                include "oregano/**"
-                exclude "**/*.po", "**/*.pot"
+                include "oregano/"
+                exclude "**/*.po", "**/*.pot"  // The .mo files are used at runtime.
                 include "oregano_gui/__init__.py"
                 include "oregano_plugins/__init__.py"
+                include "oregano_plugins/fusion/"
 
                 // From src/main/python
                 include "chaquopy/**"
@@ -117,6 +118,9 @@ android {
             outputFileName = "oregano-${variant.versionName}.apk"
         }
     }
+    buildFeatures {
+        viewBinding true
+    }
 }
 
 afterEvaluate {
@@ -136,7 +140,9 @@ afterEvaluate {
         } else {
             executable "python$pyVersion"
         }
-        args scriptFilename, STRINGS_DIR
+        args scriptFilename
+        args "--out", STRINGS_DIR
+        args "--ignore-unknown-keywords", "tor_binary_name_capitalized"  // See #1989.
     }
     for (variant in android.applicationVariants) {
         tasks.getByName("generate${variant.name.capitalize()}Resources")

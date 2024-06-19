@@ -2,10 +2,11 @@ import sys
 
 from oregano.i18n import _
 from oregano.plugins import run_hook
-from oregano import util
+from oregano import util, get_config
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
-from PyQt5.QtWidgets import QFileDialog, QAbstractButton, QWidget, QApplication, QMenu
+from PyQt5.QtWidgets import QFileDialog, QAbstractButton, QApplication, QMenu
+from PyQt5 import sip
 
 from .util import ButtonsTextEdit, MessageBoxMixin, ColorScheme
 
@@ -62,6 +63,7 @@ class ScanQRTextEdit(_QrCodeTextEdit, MessageBoxMixin):
         self.qr_button.setMenu(qr_menu)
         self.addButton(":icons/file.png", self.file_input, _("Read text or image file"))
         run_hook('scan_text_edit', self)
+        self.config = get_config()
 
     def file_input(self):
         fileName, __ = QFileDialog.getOpenFileName(self, _('Load a text file or scan an image for QR codes'))
@@ -106,18 +108,40 @@ class ScanQRTextEdit(_QrCodeTextEdit, MessageBoxMixin):
 
     def scan_qr_from_image(self, image):
         from oregano.qrreaders import get_qr_reader
-        qr_reader = get_qr_reader()
+        qr_reader = get_qr_reader(self.config.get("qr_reader", None))
         if not qr_reader:
             self.show_error(_("Unable to scan image.") + "\n" +
                             _("The platform QR detection library is not available."))
             return
 
         image_y800 = image.convertToFormat(QImage.Format_Grayscale8)
+        width = image_y800.width()
+        height = image_y800.height()
+        bpl = image_y800.bytesPerLine()
+        cropped_data = bytearray()  # Declared here to ensure this bytearray lives longer than sip_vp
+
+        if width == bpl:
+            sip_vp = image_y800.constBits()
+            sip_vp.setsize(image_y800.byteCount())
+        else:
+            # "Crop" the image to ensure that each line is exactly width() bytes,
+            # since sometimes QImage lines are in 4-byte multiples.
+            sip_arr = image_y800.constBits().asarray(image_y800.byteCount())
+            for line in range(height):
+                line_offset = line * bpl
+                for col in range(width):
+                    offset = line_offset + col
+                    cropped_data.append(sip_arr[offset])
+            sip_vp = sip.voidptr(cropped_data)
+            sip_vp.setsize(len(cropped_data))
+        assert sip_vp.getsize() == width * height
+
         res = qr_reader.read_qr_code(
-            image_y800.constBits().__int__(), image_y800.byteCount(),
-            image_y800.bytesPerLine(),
-            image_y800.width(),
-            image_y800.height()
+            buffer=sip_vp.__int__(),
+            buffer_size=sip_vp.getsize(),
+            rowlen_bytes=width,
+            width=width,
+            height=height
         )
 
         return res

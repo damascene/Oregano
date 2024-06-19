@@ -39,6 +39,7 @@ from collections import defaultdict
 
 import oregano.schnorr as schnorr
 from oregano.address import Address
+from oregano import networks
 from oregano.util import PrintError, ServerError, TimeoutException
 from . import fusion_pb2 as pb
 from . import compatibility
@@ -57,9 +58,9 @@ E24 = [1.0, 1.1, 1.2, 1.3, 1.5, 1.6, 1.8, 2.0, 2.2, 2.4, 2.7, 3.0, 3.3, 3.6, 3.9
 # TODO - make these configurable
 class Params:
     num_components = 23
-    component_feerate = 1000 # fixs/kB
-    max_excess_fee = 300000 # fixs
-    tiers = [round(b*s) for b in [10000, 100000, 1000000, 10000000, 100000000] for s in E12]
+    component_feerate = 1000 # sats/kB
+    max_excess_fee = 300000 # sats
+    tiers = [round(b*s) for b in [10000, 100000, 1000000, 10000000, 100000000, 1000000000] for s in E12]
 
     # How many clients do we want before starting a fusion?
     min_clients = 8
@@ -232,6 +233,7 @@ class FusionServer(GenericServer):
         super().__init__(bindhost, port, ClientThread, upnp = upnp)
         self.config = config
         self.network = network
+        self.is_testnet = networks.net.TESTNET
         self.announcehost = announcehost
         self.donation_address = donation_address
         self.waiting_pools = {t: WaitingPool(Params.min_clients, Params.max_tier_client_tags) for t in Params.tiers}
@@ -343,8 +345,9 @@ class FusionServer(GenericServer):
         start_ev = threading.Event()
         client.start_ev = start_ev
 
-        if client_ip.startswith('127.'):
+        if self.is_testnet or client_ip.startswith('127.'):
             # localhost is whitelisted to allow unlimited access
+            # we also allow unlimited access for testnets
             client.tags = []
         else:
             # Default tag: this IP cannot be present in too many fuses.

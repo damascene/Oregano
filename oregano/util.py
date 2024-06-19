@@ -173,6 +173,7 @@ class DebugMem(ThreadJob):
             self.mem_stats()
             self.next_time = time.time() + self.interval
 
+
 class DaemonThread(threading.Thread, PrintError):
     """ daemon thread that terminates cleanly """
 
@@ -296,16 +297,13 @@ class Monotonic:
                 with lock: return incr()
             self.__call__ = incr_with_lock
 
-_human_readable_thread_ids = defaultdict(Monotonic(locking=False))  # locking not needed on Monotonic instance as we lock the dict anyway
-_human_readable_thread_ids_lock = threading.Lock()
 _t0 = time.time()
 def print_error(*args):
     if not is_verbose: return
     if verbose_thread_id:
-        with _human_readable_thread_ids_lock:
-            args = ("|%02d|"%_human_readable_thread_ids[threading.get_ident()], *args)
+        args = (f"|{threading.current_thread().name}|", *args)
     if verbose_timestamps:
-        args = ("|%7.3f|"%(time.time() - _t0), *args)
+        args = (f"|{time.time() - _t0:7.3f}|", *args)
     print_stderr(*args)
 
 _print_lock = threading.RLock()  # use a recursive lock in extremely rare case a signal handler does a print_error while lock held by same thread as sighandler invocation's thread
@@ -349,10 +347,17 @@ def constant_time_compare(val1, val2):
 # decorator that prints execution time
 def profiler(func):
     def do_profile(args, kw_args):
+        dname = ""
+        if len(args) > 0:
+            slf = args[0]
+            # Attach args[0].diagnostic_name() to the log line if we are bound to a method of a PrintError subclass
+            if isinstance(slf, PrintError):
+                dname = slf.diagnostic_name()
         t0 = time.time()
         o = func(*args, **kw_args)
         t = time.time() - t0
-        print_error("[profiler]", func.__qualname__, "%.4f"%t)
+        dname = f" [{dname}]" if dname else dname
+        print_error(f"[profiler]{dname} {func.__qualname__} {t:.4f}")
         return o
     return lambda *args, **kw_args: do_profile(args, kw_args)
 
@@ -969,7 +974,7 @@ class Weak:
     def finalization_print_error(obj, msg=None):
         ''' Supply a message to be printed via print_error when obj is
         finalized (Python GC'd). This is useful for debugging memory leaks. '''
-        assert not isinstance(obj, type), "finaliztion_print_error can only be used on instance objects!"
+        assert not isinstance(obj, type), "finalization_print_error can only be used on instance objects!"
         if msg is None:
             if isinstance(obj, PrintError):
                 name = obj.diagnostic_name()

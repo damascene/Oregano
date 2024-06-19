@@ -29,6 +29,7 @@ import sys
 import threading
 import urllib
 
+from .rpa import addr as rpa_addr
 from .address import Address
 from . import bitcoin
 from . import networks
@@ -49,9 +50,6 @@ mainnet_block_explorers = {
 DEFAULT_EXPLORER_TESTNET = 'Ergon.Network'
 
 testnet_block_explorers = {
-    'Bitcoin.com'   : ('https://explorer.bitcoin.com/tbch',
-                       Address.FMT_LEGACY,  # For some reason testnet expects legacy and fails on bchtest: addresses.
-                       {'tx': 'tx', 'addr': 'address', 'block' : 'block'}),
     'BlockExplorer.one': ('https://blockexplorer.one/bch/testnet',
                    Address.FMT_CASHADDR,
                    {'tx': 'tx', 'addr': 'address', 'block' : 'blockHash'}),
@@ -85,13 +83,14 @@ scalenet_block_explorers = {
                    {'tx': 'tx', 'addr': 'address', 'block': 'block-height'}),
 }
 
-DEFAULT_EXPLORER_TAXCOIN = 'The Taxplorer'
+DEFAULT_EXPLORER_CHIPNET = 'Loping.net'
 
-taxcoin_block_explorers = {
-    'The Taxplorer': ('https://taxplorer.loping.net',
-                      Address.FMT_CASHADDR,
-                      {'tx': 'tx', 'addr': 'address', 'block': 'block-height'}),
+chipnet_block_explorers = {
+    'Loping.net': ('https://cbch.loping.net',
+                   Address.FMT_CASHADDR,
+                   {'tx': 'tx', 'addr': 'address', 'block': 'block-height'}),
 }
+
 
 def BE_info():
     if networks.net is networks.TestNet:
@@ -100,8 +99,8 @@ def BE_info():
         return testnet4_block_explorers
     elif networks.net is networks.ScaleNet:
         return scalenet_block_explorers
-    elif networks.net is networks.TaxCoinNet:
-        return taxcoin_block_explorers
+    elif networks.net is networks.ChipNet:
+        return chipnet_block_explorers
     return mainnet_block_explorers
 
 def BE_tuple(config):
@@ -117,8 +116,8 @@ def BE_default_explorer():
         return DEFAULT_EXPLORER_TESTNET4
     elif networks.net is networks.ScaleNet:
         return DEFAULT_EXPLORER_SCALENET
-    elif networks.net is networks.TaxCoinNet:
-        return DEFAULT_EXPLORER_TAXCOIN
+    elif networks.net is networks.ChipNet:
+        return DEFAULT_EXPLORER_CHIPNET
     return DEFAULT_EXPLORER
 
 def BE_from_config(config):
@@ -180,7 +179,10 @@ def urldecode(url):
 def parseable_schemes(net = None) -> tuple:
     if net is None:
         net = networks.net
-    return (net.CASHADDR_PREFIX, cashacct.URI_SCHEME)
+
+    return (net.CASHADDR_PREFIX, cashacct.URI_SCHEME, net.RPA_PREFIX)
+    # to turn RPA off:
+    #return (net.CASHADDR_PREFIX, cashacct.URI_SCHEME)
 
 class ExtraParametersInURIWarning(RuntimeWarning):
     ''' Raised by parse_URI to indicate the parsing succeeded but that
@@ -242,6 +244,11 @@ def parse_URI(uri, on_pr=None, *, net=None, strict=False, on_exc=None):
     address = u.path
 
     is_cashacct = u.scheme == cashacct.URI_SCHEME
+    is_paycode = u.scheme == net.RPA_PREFIX
+
+    if is_paycode:
+        rprefix, addr_hash = rpa_addr.decode(net.RPA_PREFIX + ":" + address)
+
 
     # python for android fails to parse query
     if address.find('?') > 0:
@@ -265,6 +272,8 @@ def parse_URI(uri, on_pr=None, *, net=None, strict=False, on_exc=None):
             if not cashacct.CashAcct.parse_string(address):
                 raise BadURIParameter('address', ValueError(_("{acct_name} is not a valid cashacct string").format(acct_name=address)))
             address = _strip_cashacct_str(address)
+        elif is_paycode:
+            out['address'] = address
         else:
             # validate
             try: Address.from_string(address, net=net)
@@ -349,6 +358,10 @@ def parse_URI(uri, on_pr=None, *, net=None, strict=False, on_exc=None):
         extra_keys = set(out.keys()) - accept_keys
         if extra_keys:
             raise ExtraParametersInURIWarning(out, *tuple(extra_keys))
+
+    if is_paycode:
+        out['scheme'] = "paycode"
+
     return out
 
 def check_www_dir(rdir):

@@ -23,6 +23,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+from .transaction import tx_from_str
 import argparse
 import ast
 import base64
@@ -36,6 +37,7 @@ from decimal import Decimal as PyDecimal  # Qt 5.12 also exports Decimal
 from functools import wraps
 
 from . import bitcoin
+from . import rpa
 from . import util
 from .address import Address, AddressError
 from .bitcoin import hash_160, COIN, TYPE_ADDRESS
@@ -55,6 +57,16 @@ def fixoshis(amount):
     # fixoshi conversion must not be performed by the parser
     return int(COIN*PyDecimal(amount)) if amount not in ['!', None] else amount
 
+def assertOutpoint(out: str):
+    """Perform some basic sanity checks on a string that represents a
+    transaction outpoint. Namely, 64 characters and a non-negative integer
+    separated by a colon."""
+    prevoutParts = out.split(':')
+    assert len(prevoutParts) == 2, "invalid outpoint"
+    prevout_hash, prevout_n  = prevoutParts
+    prevout_hash = bytes.fromhex(prevout_hash)
+    assert len(prevout_hash) == 32, f"{prevout_hash.hex()} should be a 32-byte hash"
+    assert int(prevout_n) >= 0, f"invalid output index {prevout_n}"
 
 class Command:
     def __init__(self, func, s):
@@ -363,6 +375,8 @@ class Commands:
         inputs = jsontx.get('inputs')
         outputs = jsontx.get('outputs')
         locktime = jsontx.get('locktime', 0)
+        locktime = jsontx.get('lockTime', locktime)
+        version = jsontx.get('version', 1)
         for txin in inputs:
             if txin.get('output'):
                 prevout_hash, prevout_n = txin['output'].split(':')
@@ -379,7 +393,7 @@ class Commands:
                 txin['num_sig'] = 1
 
         outputs = [(TYPE_ADDRESS, Address.from_string(x['address']), int(x['value'])) for x in outputs]
-        tx = Transaction.from_io(inputs, outputs, locktime=locktime, sign_schnorr=self.wallet and self.wallet.is_schnorr_enabled())
+        tx = Transaction.from_io(inputs, outputs, locktime=locktime, version=version, sign_schnorr=self.wallet and self.wallet.is_schnorr_enabled())
         tx.sign(keypairs)
         return tx.as_dict()
 
@@ -416,16 +430,30 @@ class Commands:
         return {'address':address, 'redeemScript':redeem_script}
 
     @command('w')
-    def freeze(self, address):
+    def freeze(self, address: str):
         """Freeze address. Freeze the funds at one of your wallet\'s addresses"""
         address = Address.from_string(address)
         return self.wallet.set_frozen_state([address], True)
 
     @command('w')
-    def unfreeze(self, address):
+    def unfreeze(self, address: str):
         """Unfreeze address. Unfreeze the funds at one of your wallet\'s address"""
         address = Address.from_string(address)
         return self.wallet.set_frozen_state([address], False)
+
+    @command('w')
+    def freeze_utxo(self, coin: str):
+        """Freeze a UTXO so that the wallet will not spend it."""
+        assertOutpoint(coin)
+        self.wallet.set_frozen_coin_state([coin], True)
+        return True
+
+    @command('w')
+    def unfreeze_utxo(self, coin: str):
+        """Unfreeze a UTXO so that the wallet might spend it."""
+        assertOutpoint(coin)
+        self.wallet.set_frozen_coin_state([coin], False)
+        return True
 
     @command('wp')
     def getprivatekeys(self, address, password=None):
@@ -608,6 +636,24 @@ class Commands:
                 self.wallet.add_tx_to_history(tx.txid())
                 self.wallet.save_transactions()
         return tx
+
+    @command('w')
+    def rpa_generate_paycode(self):
+        if self.wallet.wallet_type != 'rpa':
+            return {'error': 'This command may only be used on an RPA wallet.'}
+        return rpa.paycode.generate_paycode(self.wallet)
+
+    @command('w')
+    def rpa_generate_transaction_from_paycode(self, amount, paycode):
+        # WARNING: Amount is in full Bitcoin Cash units
+        return rpa.paycode.generate_transaction_from_paycode(self.wallet, self.config, amount, paycode)
+
+    @command('wp')
+    def rpa_extract_private_keys_from_transaction(self, raw_tx, password=None):
+        if self.wallet.wallet_type != 'rpa':
+            return {'error': 'This command may only be used on an RPA wallet.'}
+
+        return rpa.paycode.extract_private_keys_from_transaction(self.wallet, raw_tx, password)
 
     @command('wp')
     def payto(self, destination, amount, fee=None, feerate=None, from_addr=None, change_addr=None, nocheck=False, unsigned=False, password=None, locktime=None,
@@ -922,7 +968,7 @@ command_options = {
     'expiration':  (None, "Time in seconds"),
     'expired':     (None, "Show only expired requests."),
     'fee':         ("-f", "Transaction fee (absolute, in XRG)"),
-    'feerate':     (None, "Transaction fee rate (in sat/byte)"),
+    'feerate':     (None, "Transaction fee rate (in fix/byte)"),
     'force':       (None, "Create new address beyond gap limit, if no more addresses are available."),
     'from_addr':   ("-F", "Source address (must be a wallet address; use sweep to spend from non-wallet address)."),
     'frozen':      (None, "Show only frozen addresses"),
@@ -1058,7 +1104,10 @@ def add_global_options(parser):
     group.add_argument("--testnet", action="store_true", dest="testnet", default=False, help="Use Testnet")
     group.add_argument("--testnet4", action="store_true", dest="testnet4", default=False, help="Use Testnet4")
     group.add_argument("--scalenet", action="store_true", dest="scalenet", default=False, help="Use Scalenet")
-    group.add_argument("--taxcoin", action="store_true", dest="taxcoin", default=False, help="Use TaxCoin (ABC)")
+    group.add_argument("--chipnet", action="store_true", dest="chipnet", default=False, help="Use Chipnet")
+    group.add_argument("--regtest", action="store_true", dest="regtest", default=False, help="Use Regtest")
+    group.add_argument("-C", "--console2", action="store_true", dest="console2", default=False,
+                       help=_("Use the advanced dev console for the console tab (Qt only)"))
 
 def get_parser():
     # create main parser

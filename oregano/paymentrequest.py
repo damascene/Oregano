@@ -60,7 +60,7 @@ PR_UNPAID  = 0
 PR_EXPIRED = 1
 PR_UNKNOWN = 2     # sent but not propagated
 PR_PAID    = 3     # send and propagated
-PR_UNCONFIRMED = 7
+PR_UNCONFIRMED = 7 # paid and confirmations = 0 (7 used to match Electrum)
 
 pr_tooltips = {
     PR_UNPAID:_('Pending'),
@@ -110,12 +110,6 @@ def get_payment_request(url):
                 print_error('fetched payment request', url, len(response.content))
             except requests.exceptions.RequestException as e:
                 error = str(e)
-        elif u.scheme == 'file':
-            try:
-                with open(u.path, 'r', encoding='utf-8') as f:
-                    data = f.read()
-            except IOError:
-                error = "payment URL not pointing to a valid file"
         else:
             error = f"unknown scheme: '{u.scheme}'"
 
@@ -249,7 +243,7 @@ class PaymentRequest:
             return False
 
     def has_expired(self):
-        return self.details.expires and self.details.expires < int(time.time())
+        return bool(self.details.expires and self.details.expires < int(time.time()))
 
     def get_expiration_date(self):
         return self.details.expires
@@ -863,7 +857,7 @@ class PaymentRequest_BitPay20(PaymentRequest, PrintError):
                 else:
                     # TODO: Fixme -- for now this branch will always be taken because we turned off key download in _get_signing_keys() above
                     self.print_error('Warning: Could not verify whether signing public key is valid:', pubkey.hex(), "(PGP verification is currently disabled)")
-                self.requestor = sig_addr.to_ui_string()
+                self.requestor = owner
                 break
         else:
             self.error = 'failed to verify signature against retrieved keys'

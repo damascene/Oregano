@@ -1,6 +1,7 @@
 # Oregano - lightweight Ergon client
 # Copyright (C) 2011 thomasv@gitorious
 # Copyright (C) 2017 Neil Booth
+# Copyright (C) 2023 The Electron Cash Developers
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation files
@@ -27,6 +28,7 @@ import pkgutil
 
 from .asert_daa import ASERTDaa, Anchor
 
+
 def _read_json_dict(filename):
     try:
         data = pkgutil.get_data(__name__, filename)
@@ -35,23 +37,26 @@ def _read_json_dict(filename):
         r = {}
     return r
 
+
 class AbstractNet:
     TESTNET = False
+    REGTEST = False
     LEGACY_POW_TARGET_TIMESPAN = 14 * 24 * 60 * 60   # 2 weeks
     LEGACY_POW_TARGET_INTERVAL = 10 * 60  # 10 minutes
     LEGACY_POW_RETARGET_BLOCKS = LEGACY_POW_TARGET_TIMESPAN // LEGACY_POW_TARGET_INTERVAL  # 2016 blocks
     BASE_UNITS = {'XRG': 8, 'mXRG': 5, 'Gon': 2}
     DEFAULT_UNIT = "XRG"
+    RPA_START_HEIGHT = 0
 
 
 class MainNet(AbstractNet):
     TESTNET = False
     WIF_PREFIX = 0x80
     ADDRTYPE_P2PKH = 0
-    ADDRTYPE_P2PKH_BITPAY = 28
     ADDRTYPE_P2SH = 5
-    ADDRTYPE_P2SH_BITPAY = 40
     CASHADDR_PREFIX = "ergon"
+    RPA_PREFIX = "paycode"
+    RPA_START_HEIGHT = 825000
     HEADERS_URL = "http://bitcoincash.com/files/blockchain_headers"  # Unused
     GENESIS = "000000070e37bfee7e84b94f997f38155a85b22172f5ca25fd4eb3d64c5ad7c5"
     DEFAULT_PORTS = {'t': '52137', 's': '52138'}
@@ -97,10 +102,9 @@ class TestNet(AbstractNet):
     TESTNET = True
     WIF_PREFIX = 0xef
     ADDRTYPE_P2PKH = 111
-    ADDRTYPE_P2PKH_BITPAY = 111  # Unsure
     ADDRTYPE_P2SH = 196
-    ADDRTYPE_P2SH_BITPAY = 196  # Unsure
     CASHADDR_PREFIX = "bchtest"
+    RPA_PREFIX = "paycodetest"
     HEADERS_URL = "http://bitcoincash.com/files/testnet_headers"  # Unused
     GENESIS = "000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943"
     DEFAULT_PORTS = {'t':'51001', 's':'51002'}
@@ -110,14 +114,14 @@ class TestNet(AbstractNet):
     DEFAULT_UNIT = "tXRG"
 
     # Nov 13. 2017 HF to CW144 DAA height (height of last block mined on old DAA)
-    CW144_HEIGHT = 1155875
+    CW144_HEIGHT = 1188697
 
     # Ergon fork block specification
     BITCOIN_CASH_FORK_BLOCK_HEIGHT = 1155876
     BITCOIN_CASH_FORK_BLOCK_HASH = "00000000000e38fef93ed9582a7df43815d5c2ba9fd37ef70c9a0ea4a285b8f5"
 
-    VERIFICATION_BLOCK_MERKLE_ROOT = "d97d670815829fddcf728fa2d29665de53e83609fd471b0716a49cde383fb888"
-    VERIFICATION_BLOCK_HEIGHT = 1421482
+    VERIFICATION_BLOCK_MERKLE_ROOT = "66dfe14adb3e7576977d2db610bce4b86360ea7c3a68f56342e63f5306c94f82"
+    VERIFICATION_BLOCK_HEIGHT = 1534000
     asert_daa = ASERTDaa(is_testnet=True)
     asert_daa.anchor = Anchor(height=1421481, bits=486604799, prev_time=1605445400)
 
@@ -147,18 +151,26 @@ class TestNet4(TestNet):
     # Nov 13. 2017 HF to CW144 DAA height (height of last block mined on old DAA)
     CW144_HEIGHT = 3000
 
-    VERIFICATION_BLOCK_MERKLE_ROOT = "9ca8933d4aa7b85093e3ec317e40bdfeda3e2b793fcd7907b38580fa193d9c77"
-    VERIFICATION_BLOCK_HEIGHT = 16845
+    VERIFICATION_BLOCK_MERKLE_ROOT = "3f67f9cdb53e625f1ed52c1798c3bf329b3eccb23d6a933aca7b7703f4f1cdb9"
+    VERIFICATION_BLOCK_HEIGHT = 128000
     asert_daa = ASERTDaa(is_testnet=True)  # Redeclare to get instance for this subclass
     asert_daa.anchor = Anchor(height=16844, bits=486604799, prev_time=1605451779)
 
+
+class ChipNet(TestNet4):
+    TITLE = 'Electron Cash Chipnet'
+    HEADERS_URL = "http://bitcoincash.com/files/chipnet_headers"  # Unused
+    DEFAULT_SERVERS = _read_json_dict('servers_chipnet.json')  # DO NOT MODIFY IN CLIENT CODE
+    DEFAULT_PORTS = {'t': '64001', 's': '64002'}
+    VERIFICATION_BLOCK_MERKLE_ROOT = "9af57abc210acda2cdfa95b61bef3ba319b16838a1833e581f3528266435ddee"
+    VERIFICATION_BLOCK_HEIGHT = 128000
 
 
 class ScaleNet(TestNet):
     GENESIS = "00000000e6453dc2dfe1ffa19023f86002eb11dbb8e87d0291a4599f0430be52"
     TITLE = 'Oregano Scalenet'
     BASE_UNITS = {'sXRG': 8, 'msXRG': 5, 'sbits': 2}
-    DEFAULT_UNIT = "tXRG"
+    DEFAULT_UNIT = "sXRG"
 
 
     HEADERS_URL = "http://bitcoincash.com/files/scalenet_headers"  # Unused
@@ -178,56 +190,22 @@ class ScaleNet(TestNet):
     asert_daa.anchor = None  # Intentionally not specified because it's after checkpoint; blockchain.py will calculate
 
 
+class RegtestNet(TestNet):
+    GENESIS = "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"
+    TITLE = 'Electron Cash Regtest'
+    BASE_UNITS = {'rBCH': 8, 'rsBCH': 5, 'rbits': 2}
+    DEFAULT_UNIT = "rBCH"
+    CASHADDR_PREFIX = "bchreg"
+    REGTEST = True
 
-class TaxCoinNet(AbstractNet):
-    """ This is for supporting ABC tax coin. Use CLI arg --taxcoin to see this network.
-    Users using this network cannot see XRG and vice-versa, due to the checkpoint block.
-    If one wants to see both chains one can run 2 clients since they will use different data
-    directories. """
-    TESTNET = False
-    WIF_PREFIX = 0x80
-    ADDRTYPE_P2PKH = 0
-    ADDRTYPE_P2PKH_BITPAY = 28
-    ADDRTYPE_P2SH = 5
-    ADDRTYPE_P2SH_BITPAY = 40
-    CASHADDR_PREFIX = "bitcoincash"
-    HEADERS_URL = "http://bitcoincash.com/files/blockchain_headers"  # Unused
-    GENESIS = "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"
-    DEFAULT_PORTS = {'t': '50001', 's': '50002'}
-    DEFAULT_SERVERS = _read_json_dict('servers_taxcoin.json')  # DO NOT MODIFY IN CLIENT CODE
-    TITLE = "Electron Tax - 'Ard Moné Edition"
-    BASE_UNITS = {'TAX': 8, 'mTAX': 5, 'sechets': 2}
-    DEFAULT_UNIT = "TAX"
+    BITCOIN_CASH_FORK_BLOCK_HEIGHT = 0
+    BITCOIN_CASH_FORK_BLOCK_HASH = GENESIS
 
-    # Ergon fork block specification
-    BITCOIN_CASH_FORK_BLOCK_HEIGHT = 478559
-    BITCOIN_CASH_FORK_BLOCK_HASH = "000000000000000000651ef99cb9fcbe0dadde1d424bd9f15ff20136191a5eec"
+    VERIFICATION_BLOCK_HEIGHT = 100
+    VERIFICATION_BLOCK_MERKLE_ROOT = None
+    asert_daa = ASERTDaa(is_testnet=True) # not used on regtest
 
-    # Nov 13. 2017 HF to CW144 DAA height (height of last block mined on old DAA)
-    CW144_HEIGHT = 504031
-
-    # Note: this is not the Merkle root of the verification block itself , but a Merkle root of
-    # all blockchain headers up until and including this block. To get this value you need to
-    # connect to an ElectrumX server you trust and issue it a protocol command. This can be
-    # done in the console as follows:
-    #
-    #    network.synchronous_get(("blockchain.block.header", [height, height]))
-    #
-    # Consult the ElectrumX documentation for more details.
-    VERIFICATION_BLOCK_MERKLE_ROOT = "d0d925862df595918416020caf5467b7ae67ae8f807daf60626c36755b62f9a2"
-    VERIFICATION_BLOCK_HEIGHT = 661648  # ABC fork block
-    asert_daa = ASERTDaa(is_testnet=False)
-    asert_daa.anchor = Anchor(height=661647, bits=402971390, prev_time=1605447844)
-
-    # Version numbers for BIP32 extended keys
-    # standard: xprv, xpub
-    XPRV_HEADERS = {
-        'standard': 0x0488ade4,
-    }
-
-    XPUB_HEADERS = {
-        'standard': 0x0488b21e,
-    }
+    DEFAULT_SERVERS = _read_json_dict('servers_regtest.json')  # DO NOT MODIFY IN CLIENT CODE
 
 
 # All new code should access this to get the current network config.
@@ -264,10 +242,15 @@ def set_scalenet():
     net = ScaleNet
     _set_units()
 
-
-def set_taxcoin():
+def set_regtest():
     global net
-    net = TaxCoinNet
+    net = RegtestNet
+    _set_units()
+
+
+def set_chipnet():
+    global net
+    net = ChipNet
     _set_units()
 
 
@@ -278,16 +261,15 @@ def _instancer(cls):
 
 @_instancer
 class NetworkConstants:
-    ''' Compatibility class for old code such as extant plugins.
+    """ Compatibility class for old code such as extant plugins.
 
     Client code can just do things like:
     NetworkConstants.ADDRTYPE_P2PKH, NetworkConstants.DEFAULT_PORTS, etc.
 
     We have transitioned away from this class. All new code should use the
-    'net' global variable above instead. '''
+    'net' global variable above instead. """
     def __getattribute__(self, name):
         return getattr(net, name)
 
     def __setattr__(self, name, value):
         raise RuntimeError('NetworkConstants does not support setting attributes! ({}={})'.format(name,value))
-        #setattr(net, name, value)

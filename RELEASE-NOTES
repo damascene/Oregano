@@ -1134,3 +1134,317 @@ and there is no warning message.
 - Various internal bugfixes and code refactoring #2087 #2095 #2097 #2117 #2140
   #2143 #2151 #2155 #2156 #2158 #2160 #2154 #2176 (Daniel Gonzalez Gasull,
   Calin Culianu, Axel Gembe, Mark B Lundeberg, Malcolm Smith, Pierre K, Toporin)
+
+# RELEASE NOTES 4.2.5
+
+- appimage build: build was failing on some host systems #2181 (SomberNight)
+- Requirements: Restring PyQt5 version to >=5.12.3 and < 5.15.3 (Calin Culianu)
+- Re-enabled PyQt 5.15.3 (Calin Culianu)
+- OSX Fix: Allow for Mojave+ dark mode to work (requires Qt 5.15.2) (Calin Culianu)
+- NSIS: Wait for the uninstaller to finish #2184 (Axel Gembe)
+- NSIS: Ensure the process is not running when (un)installing #2184 (Axel Gembe)
+- Servers: Add electroncash.de scalenet server #2186 (Axel Gembe)
+- Servers: Fix indentation #2187 (Axel Gembe)
+- Build: Use git version with patch for CVE-2021-21300 #2191 (Axel Gembe)
+- setup.py: Fix typo #2192 (Axel Gembe)
+- AppImage: Include libxcb into the image #2197 (Axel Gembe)
+- Add requirements-binaries.txt to manifest #2200 (Jonas Lundqvist)
+- Install Wizard: Add derivation path scanner #2199 (Jonas Lundqvist)
+- Tweaks and fixups to the DerivationPathScanner (Calin Culianu)
+- Build: Add cffi to the requirements #2203 (Axel Gembe)
+- Android: add new layout screens for the choice between standard and multi-sig
+  wallet. (Aldin Kovačević)
+- Android: reorganize code for creating a standard wallet.(Aldin Kovačević)
+- Tor: Update to version 0.4.5.7 with some patches #2205 (Axel Gembe)
+- OpenSSL: Update to version 1.1.1j #2206 (Axel Gembe)
+- Skip path derivation scan if seed is unavailable #2208 (Jonas Lundqvist)
+- Shorten boolean expression, use double quotes #2209 (Daniel Gonzalez Gasull)
+- Style changes (from backport), small refactorings #2211 (Daniel Gonzalez Gasull)
+- Fix PR 2211 #2218 (agilewalker)
+- Add electrs.electroncash.de #2222 (Georg Engelmann)
+- Removed unreachable line of code #2224 #2234 (Daniel Gonzalez Gasull)
+- OpenSSL: Update to version 1.1.1k #2225 (Axel Gembe)
+- Python: Update to version 3.8.9 #2226 (Axel Gembe)
+- Fixed typo #2227 (Kevin Nowaczyk)
+- AppImage: Update OpenSSL to version 1.1.1-1ubuntu2.1~18.04.9
+  #2231 (Axel Gembe)
+- Android: Added initial UI for multisg wallet creation. (Aldin Kovačević)
+- Build: Verify the Python checksums #2239 (Axel Gembe)
+- Android: Various commits to support multi-sig wallets (Aldin Kovačević)
+- Remove CPFP (child pays for parent) (Calin Culianu)
+- Update servers.json (Calin Culianu)
+- Android: Using 'get_tx_info' to get the status of the transaction.
+  (Aldin Kovačević)
+- Make make_locale check exit status of gettext commands #2259 (Malcolm Smith)
+- Android: fix duplicate requirement, add missing string (Malcolm Smith)
+- Android: update to Gradle 6.5 and Android Gradle plugin 4.1.2 (Malcolm Smith)
+- Android: Added multisig wallets to the Android application #2279
+  (Aldin Kovačević)
+- Look for external plugins in ELECTRON_CASH_PATH #2301 (Jonas Lundqvist)
+- Support disabling JSON-RPC server in Daemon #2305 (MrNaif2018)
+- [fusion] Increase 'fuzz fee' to be tier/10^6 #1984 (Mark B. Lundeberg)
+- Add feerate argument to payto/paytomany #2306 (MrNaif2018)
+- Android: catch overflow errors in AmountBox; closes #2288 (Malcolm Smith)
+- Android: restore thousands commas in read-only fiat amounts; closes #2246
+  (Malcolm Smith)
+- Android: Make PaymentRequest.has_expired always return a boolean; closes #2298
+  (Malcolm Smith)
+- Android: Add missing interface_lock in Network.get_server_height; closes #2173
+  (Malcolm Smith)
+- iOS: Support OP_RETURN transaction outputs #2307 (JOE LOYA ⚡️)
+- Android: many, many, many commits fixing many things related to v4.2.4-4
+  (Malcolm Smith)
+- CashFusion: Add "spend only fused coins" to Send tab #2316 (Calin Culianu)
+- Android: add sweep private keys command (Malcolm Smith)
+- Fix daemon running in non-jsonrpc mode (MrNaif2018)
+- Various Linux and Windows build fixups (Calin Culianu)
+- Fixed build for OSX Mojave (Calin Culianu)
+- Make OpenAlias accept 'bitcoincash:' prefix #2321 (Karol Trzeszczkowski)
+- Updated checkpoints for mainnet, testnet3, and testnet4 (Calin Culianu)
+- Removed support for ABC's "TaxCoin" (Calin Culianu)
+- CashFusion Server: Allow testnets to have unlimited connections per IP
+  (Calin Culianu)
+- CashFusion: Add depth checks #2325 (Jonas Lundqvist, Calin Culianu)
+- CashFusion: Added a "Fusion Status" column to coins tab (Calin Culianu)
+- macOS: Fix popup_widget display if running in dark mode (Calin Culianu)
+- Remove bitcoin.com block explorer #2328 (Jonas Lundqvist)
+- CashFusion: Clarify status of coins on fused address #2329 (Jonas Lundqvist)
+- Add more accurate exchange rate for ARS #2326 (Santiago Chiabotto)
+
+# RELEASE NOTES 4.2.6
+
+- History list - Made fiat balance changes also appear in red (scinklja)
+- Implement unconfirmed invoices status (MrNaif2018)
+- Add ability to forget config on exit (MrNaif2018)
+- Fire payment_received event on confirmation too (MrNaif2018)
+- macOS: Set minimum system version to 10.14.0 in Info.plist  (cculianu)
+- Add native introspection opcodes (upcoming May 2022 additions to
+  script) #2339 (cculianu)
+- CashFusion: Default fusion depth, if checked, to 3 (cculianu)
+- Trivial fix: Allow plugins to use qt/util.py filename_field (acidsploit)
+- Added electrum.bitcoinverde.org to server list (Josh Green)
+- Fixups for iOS 15+ (cculianu)
+- Android: Remove pycparser from requirements-android.txt (Malcolm Smith)
+- Android: improve string conversion script, and make it detect some errors
+  (Malcolm Smith)
+- Fixups for Python 3.10 (cculianu)
+- add kisternet v3 onion to testnet  (jkister)
+- Qt: Add cleanup code to avoid random segfault on exit (cculianu)
+- AppImage: Fixed to work on Debian and Tails #2245  (Axel Gembe)
+
+# RELEASE NOTES 4.2.7
+
+- Fix for off-by-one error in op_push in bitcoin.py (cculianu)
+- Fix bitcoin.py push_script to implement BIP62 correctly  (cculianu)
+- backport: blockchain.py: bugfixes re bits_to_target and target_to_bits
+  (SomberNight)
+- Update copyright year to 2022 (sandakersmann)
+- Fix to allow fusions to continue while keeping dust protection
+  (Emergent Reasons)
+- Android: replace deprecated jcenter repository with mavenCentral (mhsmith)
+- Remove ADDRTYPE_*_BITPAY (Jonas Lundqvist)
+- Add new option: "Retire unused change addresses" #2408 (cculianu)
+- Relax qdarkstyle version bound #2396 (MrNaif2018)
+- Add support for Satochip hardware wallet v0.12 (Toporin)
+
+# RELEASE NOTES 4.2.8
+
+- Patch for Satochip v0.12 support #2410 (Toporin)
+- Add smartBCH LNS name lookup support #2414 (mainnet-pat, cculianu)
+- Build: Update the Wine build docker container to use the MSVC compiler
+  (Axel Gembe)
+- Misc build fixups related to the addition of web3 support (cculianu)
+- wine-build: add workaround for installing pyinstaller (SomberNight)
+- Build: Patch pip vendored distlib to produce deterministic zip archives
+  (Axel Gembe)
+- Build: Install a MSVC linker wrapper to make PE timestamps deterministic
+  (Axel Gembe, cculianu)
+- CashFusion: Add 10BCH fusion tier (SahidMiller)
+- CTOR workaround: Always display receives before sends for the same block
+  (cculianu)
+- MacOS-build: Build custom pyinstaller from git (SomberNight, cculianu)
+- Update libsqlite3 version for AppImage #2435 (Axel Gembe)
+- Update bundled Tor to version 0.4.7.7 #2434 (Axel Gembe)
+- Update OpenSSL to version 1.1.1o #2437 (Axel Gembe)
+- Wine: Update to version 7.7 #2436 (Axel Gembe)
+- Network: Fix for incorrect usage of python when formatting an errmsg
+  (cculianu)
+
+# RELEASE NOTES 4.2.9
+
+- LNS: Fix crash in multiple_result_picker (cculianu)
+- LNS: Make the web3 dependencies optional #2441. This allows distro packages
+  to not have to pull them in to provide electron-cash. (cculianu)
+- LNS: Fix to the "add to contacts" button + misc code nits (cculianu)
+- Qt: Disable destroyed_print_error unless a static flag is set. This fixes
+  some of the crash issues seen on Windows. (cculianu)
+- LNS: Bugfix whereby GUI was being sometimes access from a thread. This
+  fixes the remaining portion (hopefully) of the crash issues seen on
+  Windows. (cculianu)
+- LNS: Misc fixups and code cleanup (cculianu)
+
+# RELEASE NOTES 4.2.10
+
+- Windows build: Restored reproducibility of the Windows build #2444
+  (Axel Gembe)
+- Removal of dead code (cculianu)
+- Fixup for dark mode on some Linux and Windows systems (Pierre K)
+
+# RELEASE NOTES 4.2.11
+
+- Use fallback pure python implementation of ripemd160 in address.py
+  #2452 (Voker57)
+- Consolidate all use of ripemd160 to one + add pycryptodomex fallback
+  (cculianu)
+- Fix DAA activation height for testnet3 (cculianu)
+- Updated requirements to peg protobuf to a version <4.0 (cculianu)
+- Fix to blockchain.py get_bits; was sometimes wrong (cculianu)
+- Update servers.json #2453 (kzKallisti)
+- Ledger: Add Nano-S-Plus USB device ids #2454 (vrabe)
+- Tor: Update to version 0.4.7.8 with a patch for static linking
+  #2456 (Axel Gembe)
+- Add RPA - Reusable Payment Addresses #2450  (Jonald Fyookball, OPReturn)
+- Normalise exchange rate #2462 (MrNaif2018)
+- Tor: Fix closing of stdout on Windows #2466 (Axel Gembe)
+- Allow restoring wallet in diskless mode #2464 (MrNaif2018)
+- Add same code for restore_wallet_from_text #2473 (MrNaif2018)
+- Tor: Fix launch_tor override of close_output argument #2468 (Axel Gembe)
+- Update default CashFusion server to fusion.servo.cash (#2469) (kzKallisti)
+- AppImage: Fix package versions and add cargo dependency #2470 (Axel Gembe)
+- Wine: Update Ubuntu from impish to jammy #2471 (Axel Gembe)
+- Tor: Update to version 0.4.7.10 with a patch for static linking #2472
+  (Axel Gembe)
+- Updated checkpoints (cculianu)
+
+# RELEASE NOTES 4.2.12
+
+- Fixed text alignment in addresses tab #2477 (scinklja)
+- Removal of some dead code (cculianu)
+- Android: Add optional Dark Mode #2483 (Jonas Lundqvist)
+- Added BCH "chipnet" network; --chipnet (cculianu)
+- Remove some defunct mainnet servers #2488 (jkister)
+- commands: add freeze_utxo and unfreeze_utxo RPCs #2490 (chappjc)
+- commands: get_info and list_wallets daemon cmds to RPCs #2491
+  (chappjc, Jonas Lundqvist)
+- Added regtest support; --regtest #2319 (MrNaif)
+- Fixed units for regtest and scalenet (cculianu)
+- Add server-chipnet.json to setup.py #2494 (0e4ef622)
+- Removal of the LabelSync plugin due to unreliability
+  #2498 (georgengelmann)
+- Add instructions to compile the icons for Qt #2499
+  (georgengelmann)
+- Android: Bump chaquopy to 13.0.0 #2500 (Jonas Lundqvist)
+- Removal of RPA from the GUI and from payment request handling
+  #2503 (Jonald Fyookball)
+
+# RELEASE NOTES 4.2.13
+
+- Regtest via pytest #2403 (Jonas Lundqvist)
+- Add tx_hashes to exported payment request #2504 (MrNaif)
+- Change bch.ninja to cashnode.bch.ninja #2506 (kzKallisti)
+- Run tox in github action #2508 (Jonas Lundqvist)
+- Set BitPay as requestor on jsonPayPro invoices #2510 (Jonas Lundqvist)
+- Add basic test for jsonPaymentProtocol #2511 (Jonas Lundqvist)
+- Trigger on Master branch + Add GitHub Action badge to README #2513 (Jonas Lundqvist)
+- Fixed typo in main_window.py "unnused" -> "unused", plus whitespace nits (cculianu)
+- Update electroncash.de servers #2516 (Georg Engelmann)
+- Remove python 3.6 from github workflow and/or tox.ini (cculianu)
+- Added Melory's BCH Explorer to the list of block explorers (cculianu)
+- Add chipnet.bch.ninja to servers_chipnet.json #2520 (kzKallisti)
+- Fix for contrib/make_all: Use a non-zero nr of jobs #2522 (Melroy van den Berg)
+- Allow zero-amount and partial payments in invoices #2523 (MrNaif)
+- Tor: Update to version 0.4.7.12 with a patch for static linking #2529 (Axel Gembe)
+- Updated checkpoints for mainnet, testnet3, testnet4, and chipnet (cculianu)
+
+# RELEASE NOTES 4.2.14
+
+- BUGFIX: Fix crashes in payment requests with amount of None #2535 (MrNaif)
+- Build: Update dnspython to version 2.2.0 #2530 (SomberNight, Axel Gembe)
+- Servers: Add loping.net chipnet server + explorer #2531 (Axel Gembe)
+- Add builds to GitHub actions + Bump test versions #2532, #2526 (Jonas Lundqvist)
+- Disable OSX build github action (cculianu)
+- Cleanup of top README #2534 (Jonas Lundqvist)
+- test: Flip last bit in negative test cases #2536 (Jonas Lundqvist)
+- Remove references to Travis CI + Enforce python >= 3.7 in setup.py #2537, #2538 (Jonas Lundqvist)
+- Only archive GH Actions artifacts once + Split regtest in separate files #2539, #2540 (Jonas Lundqvist)
+- Fixes to get auto-build to work (cculianu)
+
+# RELEASE NOTES 4.3.0
+
+- Added support for CashTokens, incuding token-aware addresses and creating/sending/receiving/managing
+  tokens in-wallet. Thank you to all that contributed in the Flipstarter that made this happen!
+  #2612 (cculianu, Andrew-128)
+- Explorer: Add 3XPL explorer #2546 (Axel Gembe)
+- Bump various dependencies #2547, #2553 (Jonas Lundqvist)
+- Various build-related dev-facing additions (Jonas Lundqvist)
+- Remove LNS and web3 dependencies LNS Related to smartBCH #2559, #2560 (cculianu)
+- Fusion on android; android Cash FusionCash Fusion enhancements and features #2563 (OPReturnCode)
+- add fulcrum.criptolayer.net to servers.json #2564 (molecular)
+
+# RELEASE NOTES 4.3.1
+
+- Added a performance fix which led to pessimization/slowdown when opening wallets in some cases (cculianu)
+- Added a fix where CashFusion was "seeing" token-containing UTXOs. Not normally an issue but if
+  they have significant funds on them, this could cause fusions to fail (cculianu).
+- Fixed a typo: "Cateogry" -> "Category" ##2617 (7e378beb8)
+- Fix for exoteric bug/problem on Python 3.11 in some rare cases.
+
+# RELEASE NOTES 4.4.0
+
+- Re-enabled and fixed-up Reusable Payment Address (RPA) support [BETA] (cculianu, fyookball)
+- Fix test_tx_unsigned #2622 (Jonas Lundqvist)
+- Fixes for satochip plugin #2627, #2632 (toporin)
+- Various AppImage fixes (Axel Gembe)
+- Various Windows build fixes (Axel Gembe)
+- Various plugin system fixes spesmilo#5421 spesmilo#4842 (SomberNight, Axel Gembe)
+- Interface: Use check_hostname instead of match_hostname (Axel Gembe)
+- [backport] fix more DeprecationWarnings  (SomberNight, Axel Gembe)
+- [tests] Skip test_interface if offline  https://reviews.bitcoinabc.org/D14440 (Axel Gembe, others)
+- Tests: Update Python 3.12 to 3.12.0-rc.2, include Windows #2689 (Axel Gembe)
+- Fix the Optional Features menu Bitcoin-ABC@ff1a101 (PiRK, Axel Gembe)
+- plugins: fix loading of external plugins on Python < 3.10 #2710 (Axel Gembe)
+- tests: Use Python 3.12 (Axel Gembe)
+- secp256k1: Improve warning message by adding path and exception details #2712 (Axel Gembe)
+- Fix various strings that were wrong, inconsistent or not translatable #2718 (Axel Gembe)
+- test: Make the interface test work without internet connection #2719 (Axel Gembe)
+- plugins: Fix relative imports in plugin GUIs and external plugins #2720 (Axel Gembe)
+- tests: add missing regtest coverage requirement #2721 (Axel Gembe)
+- Various other test fixes (Axel Gembe)
+- Performance: make receive_history_callback faster for larger histories (cculianu)
+- Performance: Speed up loading of very large wallets (cculianu)
+- Various WINE build fixes #2728 (Axel Gembe)
+- Tweak to mnemonic.py -- optionally allow ambiguous BIP39/Electrum seeds (cculianu)
+- Various nits and small fixes (cculianu)
+- blockchain.py: Fixes for regtest (cculianu)
+- Android: Revive build, plus various Android fixes (Jonas Lundqvist)
+- Various minor UI fixups for CashTokens (cculianu)
+- Strenghened the send tab warning when sending to legacy addresses (cculianu)
+- Implemented a new wallet type: multi_xpub, which multiplexes multiple wallets into one #2731 (cculianu)
+- Label import: Allow multi-file selection and also unencrypted wallets (cculianu)
+- network_dialog: Validate hosts and ports #2744 (Axel Gembe)
+- Qt: Fix PyQt5 import from PyQt5.Qt instead of PyQt5.QtCore #2753 (Axel Gembe)
+- build-wine: Update xvfb and winbind to latest security patch #2752 (Axel Gembe)
+- Add ZXing-C++ QR scanner #2685 (Axel Gembe)
+- Fix issue with zxing not able to use images with padding (cculianu)
+- Trezorlib fixes #2744 (tl121)
+- AppImage build upgrade to Ubuntu 20.04 (tl121)
+- fix windows+appimage builds (latest security patch) #2778 (proteanx)
+- Adding optional version parameter to Transaction.from_io #2786 (The00Dustin)
+- Fix Appimage build files for deterministic build #2790 (tl121)
+- Many fixes for WINE build, including ugprade to Python 3.11 (Axel Gembe)
+- Many other build fixes including upgraded openssl, zbar, etc (Axel Gembe)
+- Update transaction.py to accept both capitalizations of locktime #2782 (The00Dustin)
+- Bump gh-action-pip-audit #2795 (Jonas Lundqvist)
+- Bump python dependencies #2796 (Jonas Lundqvist)
+
+# RELEASE NOTES 4.4.1
+
+- Use native architecture when building on macos #2804 (The00Dustin)
+- build: Update PyOpenSSL to version 24.1.0 #2815 (Axel Gembe)
+- build: Fix AppImage reproducibility by using rusts trim-paths #2816 (Axel Gembe)
+- build: remove deprecated apt-key for winehq key #2820 (Axel Gembe)
+- Don't allow a server sending us a dict as "params" to crash network thread (cculianu)
+- portable: bugfix where it was deleting the user directory + more #2833 (Axel Gembe)
+- Add optional support for more advanced "Console" tab, enabled with -C when running from source (cculianu)
+- Add colon and help text to QR reader setting label #2838 (Axel Gembe)
+- Fix for macOS ARM segfault crash in darkdetect when running from source (cculianu, The00Dustin)

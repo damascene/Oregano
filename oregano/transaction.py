@@ -3,6 +3,9 @@
 # Electrum - lightweight Bitcoin client
 # Copyright (C) 2011 Thomas Voegtlin
 #
+# Electron Cash - lightweight Bitcoin Cash client
+# Copyright (C) 2023 The Electron Cash Developers
+#
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation files
 # (the "Software"), to deal in the Software without restriction,
@@ -24,7 +27,6 @@
 # SOFTWARE.
 
 
-
 # Note: The deserialization code originally comes from ABE.
 
 from .util import print_error, profiler
@@ -33,138 +35,26 @@ from .caches import ExpiringCache
 from .bitcoin import *
 from .address import (PublicKey, Address, Script, ScriptOutput, hash160,
                       UnknownAddress, OpCodes as opcodes,
-                      P2PKH_prefix, P2PKH_suffix, P2SH_prefix, P2SH_suffix)
+                      P2PKH_prefix, P2PKH_suffix, P2SH_prefix, P2SH_suffix, P2SH32_prefix, P2SH32_suffix)
+from .serialize import BCDataStream, SerializationError
 from . import schnorr
+from . import token
 from . import util
-import struct
 import warnings
 
-#
-# Workalike python implementation of Bitcoin's CDataStream class.
-#
 from .keystore import xpubkey_to_address, xpubkey_to_pubkey
 
 NO_SIGNATURE = 'ff'
 
 
-class SerializationError(Exception):
-    """ Thrown when there's a problem deserializing or serializing """
-
 class InputValueMissing(ValueError):
     """ thrown when the value of an input is needed but not present """
-
-class BCDataStream(object):
-    def __init__(self):
-        self.input = None
-        self.read_cursor = 0
-
-    def clear(self):
-        self.input = None
-        self.read_cursor = 0
-
-    def write(self, _bytes):  # Initialize with string of _bytes
-        if self.input is None:
-            self.input = bytearray(_bytes)
-        else:
-            self.input += bytearray(_bytes)
-
-    def read_string(self, encoding='ascii'):
-        # Strings are encoded depending on length:
-        # 0 to 252 :  1-byte-length followed by bytes (if any)
-        # 253 to 65,535 : byte'253' 2-byte-length followed by bytes
-        # 65,536 to 4,294,967,295 : byte '254' 4-byte-length followed by bytes
-        # ... and the Bitcoin client is coded to understand:
-        # greater than 4,294,967,295 : byte '255' 8-byte-length followed by bytes of string
-        # ... but I don't think it actually handles any strings that big.
-        if self.input is None:
-            raise SerializationError("call write(bytes) before trying to deserialize")
-
-        length = self.read_compact_size()
-
-        return self.read_bytes(length).decode(encoding)
-
-    def write_string(self, string, encoding='ascii'):
-        string = to_bytes(string, encoding)
-        # Length-encoded as with read-string
-        self.write_compact_size(len(string))
-        self.write(string)
-
-    def read_bytes(self, length):
-        try:
-            result = self.input[self.read_cursor:self.read_cursor+length]
-            self.read_cursor += length
-            return result
-        except IndexError:
-            raise SerializationError("attempt to read past end of buffer")
-
-        return ''
-
-    def can_read_more(self) -> bool:
-        if not self.input:
-            return False
-        return self.read_cursor < len(self.input)
-
-    def read_boolean(self): return self.read_bytes(1)[0] != chr(0)
-    def read_int16(self): return self._read_num('<h')
-    def read_uint16(self): return self._read_num('<H')
-    def read_int32(self): return self._read_num('<i')
-    def read_uint32(self): return self._read_num('<I')
-    def read_int64(self): return self._read_num('<q')
-    def read_uint64(self): return self._read_num('<Q')
-
-    def write_boolean(self, val): return self.write(chr(1) if val else chr(0))
-    def write_int16(self, val): return self._write_num('<h', val)
-    def write_uint16(self, val): return self._write_num('<H', val)
-    def write_int32(self, val): return self._write_num('<i', val)
-    def write_uint32(self, val): return self._write_num('<I', val)
-    def write_int64(self, val): return self._write_num('<q', val)
-    def write_uint64(self, val): return self._write_num('<Q', val)
-
-    def read_compact_size(self):
-        try:
-            size = self.input[self.read_cursor]
-            self.read_cursor += 1
-            if size == 253:
-                size = self._read_num('<H')
-            elif size == 254:
-                size = self._read_num('<I')
-            elif size == 255:
-                size = self._read_num('<Q')
-            return size
-        except IndexError:
-            raise SerializationError("attempt to read past end of buffer")
-
-    def write_compact_size(self, size):
-        if size < 0:
-            raise SerializationError("attempt to write size < 0")
-        elif size < 253:
-            self.write(bytes([size]))
-        elif size < 2**16:
-            self.write(b'\xfd')
-            self._write_num('<H', size)
-        elif size < 2**32:
-            self.write(b'\xfe')
-            self._write_num('<I', size)
-        elif size < 2**64:
-            self.write(b'\xff')
-            self._write_num('<Q', size)
-
-    def _read_num(self, format):
-        try:
-            (i,) = struct.unpack_from(format, self.input, self.read_cursor)
-            self.read_cursor += struct.calcsize(format)
-        except Exception as e:
-            raise SerializationError(e)
-        return i
-
-    def _write_num(self, format, num):
-        s = struct.pack(format, num)
-        self.write(s)
 
 
 # This function comes from bitcointools, bct-LICENSE.txt.
 def long_hex(bytes):
     return bytes.encode('hex_codec')
+
 
 # This function comes from bitcointools, bct-LICENSE.txt.
 def short_hex(bytes):
@@ -176,11 +66,14 @@ def short_hex(bytes):
 
 def match_decoded(decoded, to_match):
     if len(decoded) != len(to_match):
-        return False;
+        return False
     for i in range(len(decoded)):
-        if to_match[i] == opcodes.OP_PUSHDATA4 and decoded[i][0] <= opcodes.OP_PUSHDATA4 and decoded[i][0]>0:
-            continue  # Opcodes below OP_PUSHDATA4 all just push data onto stack, and are equivalent.
-        if to_match[i] != decoded[i][0]:
+        op = decoded[i][0]
+        if to_match[i] == opcodes.OP_PUSHDATA4 and op <= opcodes.OP_PUSHDATA4 and op > 0:
+            # Opcodes below OP_PUSHDATA4 just push data onto stack, and are equivalent.
+            # Note we explicitly don't match OP_0, OP_1 through OP_16 and OP1_NEGATE here
+            continue
+        if to_match[i] != op:
             return False
     return True
 
@@ -188,11 +81,13 @@ def match_decoded(decoded, to_match):
 def parse_sig(x_sig):
     return [None if x == NO_SIGNATURE else x for x in x_sig]
 
+
 def safe_parse_pubkey(x):
     try:
         return xpubkey_to_pubkey(x)
     except:
         return x
+
 
 def parse_scriptSig(d, _bytes):
     try:
@@ -269,12 +164,17 @@ def parse_redeemScript(s):
                                               for p in pubkeys])
     return m, n, x_pubkeys, pubkeys, redeemScript
 
+
 def get_address_from_output_script(_bytes):
     scriptlen = len(_bytes)
 
     if scriptlen == 23 and _bytes.startswith(P2SH_prefix) and _bytes.endswith(P2SH_suffix):
         # Pay-to-script-hash
         return TYPE_ADDRESS, Address.from_P2SH_hash(_bytes[2:22])
+
+    if scriptlen == 35 and _bytes.startswith(P2SH32_prefix) and _bytes.endswith(P2SH32_suffix):
+        # P2SH32
+        return TYPE_ADDRESS, Address.from_P2SH_hash(_bytes[2:34])
 
     if scriptlen == 25 and _bytes.startswith(P2PKH_prefix) and _bytes.endswith(P2PKH_suffix):
         # Pay-to-pubkey-hash
@@ -327,25 +227,43 @@ def parse_input(vds):
             d['type'] = 'unknown'
         if not Transaction.is_txin_complete(d):
             del d['scriptSig']
-            d['value'] = vds.read_uint64()
+            val = vds.read_uint64()
+            if val >= 0xff_ff_ff_ff_ff_ff_ff_f0:
+                # Hack to stuff utxo data into txin (this breaks older clients, however)
+                ext_version = val & 0xf  # "extension" version is low-order nybble
+                # Future-proof this hack: version 0xf (if extending this, use 0xe, 0xd, 0xc etc..)
+                if ext_version == 0xf:
+                    val = vds.read_compact_size(strict=True)
+                    wspk = vds.read_bytes(strict=True)
+                    assert wspk and wspk[0] == token.PREFIX_BYTE[0], "Expected serialized token data"
+                    token_data, spk = token.unwrap_spk(wspk)
+                    assert not spk  # For now, we never serialize the prevout's spk and it must be empty
+                    d['value'] = val  # For being able to sign offline
+                    d['token_data'] = token_data  # For being able to sign token inputs offline
+                else:
+                    raise SerializationError(f"Unknown txn format extension: {ext_version:x}")
+            else:
+                # Legacy format
+                d['value'] = val
+                d['token_data'] = None
     return d
 
 
 def parse_output(vds, i):
     d = {}
     d['value'] = vds.read_int64()
-    scriptPubKey = vds.read_bytes(vds.read_compact_size())
+    wrappedScriptPubKey = vds.read_bytes(vds.read_compact_size())
+    token_data, scriptPubKey = token.unwrap_spk(wrappedScriptPubKey)
     d['type'], d['address'] = get_address_from_output_script(scriptPubKey)
     d['scriptPubKey'] = bh2u(scriptPubKey)
+    d['token_data'] = token_data
     d['prevout_n'] = i
     return d
 
 
 def deserialize(raw):
-    vds = BCDataStream()
-    vds.write(bfh(raw))
+    vds = BCDataStream(bfh(raw))
     d = {}
-    start = vds.read_cursor
     d['version'] = vds.read_int32()
     n_vin = vds.read_compact_size()
     d['inputs'] = [parse_input(vds) for i in range(n_vin)]
@@ -358,19 +276,14 @@ def deserialize(raw):
 
 
 # pay & redeem scripts
-
-
-
 def multisig_script(public_keys, m):
     n = len(public_keys)
     assert n <= 15
     assert m <= n
-    op_m = format(opcodes.OP_1 + m - 1, 'x')
-    op_n = format(opcodes.OP_1 + n - 1, 'x')
-    keylist = [op_push(len(k)//2) + k for k in public_keys]
-    return op_m + ''.join(keylist) + op_n + 'ae'
-
-
+    op_m = push_script_bytes(bytes([m])).hex()
+    op_n = push_script_bytes(bytes([n])).hex()
+    keylist = [push_script(k) for k in public_keys]
+    return op_m + ''.join(keylist) + op_n + bytes([opcodes.OP_CHECKMULTISIG]).hex()
 
 
 class Transaction:
@@ -394,6 +307,7 @@ class Transaction:
             raise BaseException("cannot initialize transaction", raw)
         self._inputs = None
         self._outputs = None
+        self._token_datas = None
         self.locktime = 0
         self.version = 1
         self._sign_schnorr = sign_schnorr
@@ -417,6 +331,12 @@ class Transaction:
         # there!
         self.ephemeral = dict()
 
+    def is_memory_compact(self):
+        """Returns True if the tx is stored in memory only as self.raw (serialized) and has no deserialized data
+        structures currently in memory. """
+        return (self.raw is not None
+                and self._inputs is None and self._outputs is None and self.locktime == 0 and self.version == 1)
+
     def set_sign_schnorr(self, b):
         self._sign_schnorr = b
 
@@ -430,10 +350,18 @@ class Transaction:
             self.deserialize()
         return self._inputs
 
-    def outputs(self):
+    def outputs(self, *, tokens=False) -> list:
         if self._outputs is None:
             self.deserialize()
+        if tokens:
+            assert len(self._outputs) == len(self._token_datas)
+            return list(zip(self._outputs, self._token_datas))
         return self._outputs
+
+    def token_datas(self) -> list:
+        if self._token_datas is None:
+            self.deserialize()
+        return self._token_datas
 
     @classmethod
     def get_sorted_pubkeys(self, txin):
@@ -500,8 +428,8 @@ class Transaction:
         self.raw = self.serialize()
 
     def is_schnorr_signed(self, input_idx):
-        ''' Return True IFF any of the signatures for a particular input
-        are Schnorr signatures (Schnorr signatures are always 64 bytes + 1) '''
+        """ Return True IFF any of the signatures for a particular input
+        are Schnorr signatures (Schnorr signatures are always 64 bytes + 1) """
         if (isinstance(self._inputs, (list, tuple))
                 and input_idx < len(self._inputs)
                 and self._inputs[input_idx]):
@@ -520,26 +448,50 @@ class Transaction:
         self.invalidate_common_sighash_cache()
         self._inputs = d['inputs']
         self._outputs = [(x['type'], x['address'], x['value']) for x in d['outputs']]
+        self._token_datas = [x['token_data'] for x in d['outputs']]
         assert all(isinstance(output[1], (PublicKey, Address, ScriptOutput))
                    for output in self._outputs)
+        assert all(isinstance(td, (token.OutputData, type(None)))
+                   for td in self._token_datas)
         self.locktime = d['lockTime']
         self.version = d['version']
         return d
 
     @classmethod
-    def from_io(klass, inputs, outputs, locktime=0, sign_schnorr=False):
+    def from_io(cls, inputs, outputs, locktime=0, sign_schnorr=False, *, token_datas=None, version=1) -> object:
         assert all(isinstance(output[1], (PublicKey, Address, ScriptOutput))
                    for output in outputs)
-        self = klass(None)
+        self = cls(None)
         self._inputs = inputs
         self._outputs = outputs.copy()
+        self.version = version
+        if token_datas is not None:
+            assert all(isinstance(td, (token.OutputData, type(None)))
+                       for td in token_datas)
+            self._token_datas = token_datas.copy()
+        else:
+            self._token_datas = []
+        # Ensure len(self._token_datas) == len(self._outputs)
+        lt = len(self._token_datas)
+        lo = len(self._outputs)
+        if lt < lo:
+            # If they specified a short list, pad with None
+            self._token_datas += [None] * (lo - lt)
+            lt = len(self._token_datas)
+        assert lt == lo
         self.locktime = locktime
         self.set_sign_schnorr(sign_schnorr)
         return self
 
     @classmethod
-    def pay_script(self, output):
+    def pay_script(cls, output) -> str:
+        """Note: we cannot make this based on the bytes version since some code overrides this, so this function
+        must be the basis for the data."""
         return output.to_script().hex()
+
+    @classmethod
+    def pay_script_bytes(cls, output) -> bytes:
+        return bfh(cls.pay_script(output))
 
     @classmethod
     def estimate_pubkey_size_from_x_pubkey(cls, x_pubkey):
@@ -568,12 +520,12 @@ class Transaction:
             return 0x21  # just guess it is compressed
 
     @classmethod
-    def get_siglist(self, txin, estimate_size=False, sign_schnorr=False):
+    def get_siglist(cls, txin, estimate_size=False, sign_schnorr=False):
         # if we have enough signatures, we use the actual pubkeys
         # otherwise, use extended pubkeys (with bip32 derivation)
         num_sig = txin.get('num_sig', 1)
         if estimate_size:
-            pubkey_size = self.estimate_pubkey_size_for_txin(txin)
+            pubkey_size = cls.estimate_pubkey_size_for_txin(txin)
             pk_list = ["00" * pubkey_size] * len(txin.get('x_pubkeys', [None]))
             # we assume that signature will be 0x48 bytes long if ECDSA, 0x41 if Schnorr
             if sign_schnorr:
@@ -582,7 +534,7 @@ class Transaction:
                 siglen = 0x48
             sig_list = [ "00" * siglen ] * num_sig
         else:
-            pubkeys, x_pubkeys = self.get_sorted_pubkeys(txin)
+            pubkeys, x_pubkeys = cls.get_sorted_pubkeys(txin)
             x_signatures = txin['signatures']
             signatures = list(filter(None, x_signatures))
             is_complete = len(signatures) == num_sig
@@ -595,7 +547,7 @@ class Transaction:
         return pk_list, sig_list
 
     @classmethod
-    def input_script(self, txin, estimate_size=False, sign_schnorr=False):
+    def input_script(cls, txin, estimate_size=False, sign_schnorr=False) -> str:
         # For already-complete transactions, scriptSig will be set and we prefer
         # to use it verbatim in order to get an exact reproduction (including
         # malleated push opcodes, etc.).
@@ -608,7 +560,7 @@ class Transaction:
         _type = txin['type']
         if _type == 'coinbase':
             raise RuntimeError('Attempted to serialize coinbase with missing scriptSig')
-        pubkeys, sig_list = self.get_siglist(txin, estimate_size, sign_schnorr=sign_schnorr)
+        pubkeys, sig_list = cls.get_siglist(txin, estimate_size, sign_schnorr=sign_schnorr)
         script = ''.join(push_script(x) for x in sig_list)
         if _type == 'p2pk':
             pass
@@ -634,14 +586,13 @@ class Transaction:
         signatures = list(filter(None, x_signatures))
         return len(signatures) == num_sig
 
-
     @classmethod
-    def get_preimage_script(self, txin):
+    def get_preimage_script(cls, txin):
         _type = txin['type']
         if _type == 'p2pkh':
             return txin['address'].to_script().hex()
         elif _type == 'p2sh':
-            pubkeys, x_pubkeys = self.get_sorted_pubkeys(txin)
+            pubkeys, x_pubkeys = cls.get_sorted_pubkeys(txin)
             return multisig_script(pubkeys, txin['num_sig'])
         elif _type == 'p2pk':
             pubkey = txin['pubkeys'][0]
@@ -653,30 +604,70 @@ class Transaction:
             raise RuntimeError('Unknown txin type', _type)
 
     @classmethod
-    def serialize_outpoint(self, txin):
-        return bh2u(bfh(txin['prevout_hash'])[::-1]) + int_to_hex(txin['prevout_n'], 4)
+    def serialize_outpoint(cls, txin) -> str:
+        return bh2u(cls.serialize_outpoint_bytes(txin))
 
     @classmethod
-    def serialize_input(self, txin, script, estimate_size=False):
+    def serialize_outpoint_bytes(cls, txin) -> bytes:
+        return bfh(txin['prevout_hash'])[::-1] + int_to_bytes(txin['prevout_n'], 4)
+
+    @classmethod
+    def serialize_input(cls, txin, script, estimate_size=False) -> str:
+        return cls.serialize_input_bytes(txin, bytes.fromhex(script), estimate_size).hex()
+
+    @classmethod
+    def serialize_input_bytes(cls, txin, script: bytes, estimate_size=False) -> bytes:
         # Prev hash and index
-        s = self.serialize_outpoint(txin)
+        b = bytearray(cls.serialize_outpoint_bytes(txin))
         # Script length, script, sequence
-        s += var_int(len(script)//2)
-        s += script
-        s += int_to_hex(txin.get('sequence', 0xffffffff - 1), 4)
-        # offline signing needs to know the input value
+        b += var_int_bytes(len(script))
+        b += script
+        b += int_to_bytes(txin.get('sequence', 0xffffffff - 1), 4)
+        # offline signing needs to know the input value (and possibly also the token_data)
         if ('value' in txin
-            and txin.get('scriptSig') is None
-            and not (estimate_size or self.is_txin_complete(txin))):
-            s += int_to_hex(txin['value'], 8)
-        return s
+                and txin.get('scriptSig') is None
+                and not (estimate_size or cls.is_txin_complete(txin))):
+            if txin.get('token_data'):
+                # New format, encapsulate value + token data (for token signing)
+                b += int_to_bytes(0xff_ff_ff_ff_ff_ff_ff_ff, 8)  # Special marker for extended format
+                b += var_int_bytes(txin['value'])  # Extended format value is a compactsize to save space
+                wspk = token.wrap_spk(txin['token_data'], b'')  # Shortcut to get PREFIX_BYTE + serialized_token_data
+                b += var_int_bytes(len(wspk))  # write compact size
+                b += wspk
+            else:
+                # Legacy format, we write the value directly
+                b += int_to_bytes(txin['value'], 8)
+        return bytes(b)
 
-    def BIP_LI01_sort(self):
-        # See https://github.com/kristovatlas/rfc/blob/master/bips/bip-li01.mediawiki
-        self._inputs.sort(key = lambda i: (i['prevout_hash'], i['prevout_n']))
-        self._outputs.sort(key = lambda o: (o[2], self.pay_script(o[1])))
+    def BIP69_sort(self, *, sort_outputs=True, sort_inputs=True):
+        """See https://en.bitcoin.it/wiki/BIP_0069 plus https://github.com/bitjson/cashtokens"""
+        if sort_inputs:
+            self._inputs.sort(key=lambda txin: (txin['prevout_hash'], txin['prevout_n']))
+        if sort_outputs:
+            zipped_outputs = self.outputs(tokens=True)
 
-    def serialize_output(self, output):
+            # sort by (nValue, scriptPubKey, token_data)
+            def output_as_tup(tup):
+                output, token_data = tup
+                typ, addr_like, value = output
+                if token_data is None:
+                    # Ensure "None" sorts before any possible token tuple
+                    tok_tup = (-1, -1, -1, b'', b'')
+                else:
+                    tok_tup = (token_data.amount, int(token_data.has_nft()), token_data.get_capability(),
+                               token_data.commitment, token_data.id)
+                return value, self.pay_script(addr_like), tok_tup
+
+            zipped_outputs.sort(key=lambda tup: output_as_tup(tup))
+            # Unzip sorted outputs
+            self._outputs = [output for output, _ in zipped_outputs]
+            self._token_datas = [token_data for _, token_data in zipped_outputs]
+        self.invalidate_common_sighash_cache()
+        assert len(self._outputs) == len(self._token_datas)
+
+    def serialize_output(self, output) -> str:
+        """DO NOT USE. Does not know about tokens. Only used by satochip plugin."""
+        warnings.warn("warning: deprecated Transaction.serialize_output", FutureWarning, stacklevel=2)
         output_type, addr, amount = output
         s = int_to_hex(amount, 8)
         script = self.pay_script(addr)
@@ -684,20 +675,33 @@ class Transaction:
         s += script
         return s
 
+    def serialize_output_n_bytes(self, n: int) -> bytes:
+        assert 0 <= n < len(self._outputs)
+        assert len(self._token_datas) == len(self._outputs)
+        output = self._outputs[n]
+        token_data = self._token_datas[n]
+        output_type, addr_like_obj, amount = output
+        buf = bytearray(int_to_bytes(amount, 8))
+        spk = self.pay_script_bytes(addr_like_obj)
+        wspk = token.wrap_spk(token_data, spk)
+        buf.extend(var_int_bytes(len(wspk)))
+        buf.extend(wspk)
+        return bytes(buf)
+
     @classmethod
     def nHashType(cls):
-        '''Hash type in hex.'''
+        """Hash type in hex."""
         warnings.warn("warning: deprecated tx.nHashType()", FutureWarning, stacklevel=2)
         return 0x01 | (cls.SIGHASH_FORKID + (cls.FORKID << 8))
 
     def invalidate_common_sighash_cache(self):
-        ''' Call this to invalidate the cached common sighash (computed by
+        """Call this to invalidate the cached common sighash (computed by
         `calc_common_sighash` below).
 
         This is function is for advanced usage of this class where the caller
         has mutated the transaction after computing its signatures and would
-        like to explicitly delete the cached common sighash. See
-        `calc_common_sighash` below. '''
+        like to explicitly delete the cached common sighash.
+        See `calc_common_sighash` below."""
         try: del self._cached_sighash_tup
         except AttributeError: pass
 
@@ -716,8 +720,8 @@ class Transaction:
         Warning: If you modify non-signature parts of the transaction
         afterwards, this cache will be wrong! """
         inputs = self.inputs()
-        outputs = self.outputs()
-        meta = (len(inputs), len(outputs))
+        n_outputs = len(self.outputs())
+        meta = (len(inputs), n_outputs)
 
         if use_cache:
             try:
@@ -732,9 +736,9 @@ class Transaction:
                 else:
                     del cmeta, res, self._cached_sighash_tup
 
-        hashPrevouts = Hash(bfh(''.join(self.serialize_outpoint(txin) for txin in inputs)))
-        hashSequence = Hash(bfh(''.join(int_to_hex(txin.get('sequence', 0xffffffff - 1), 4) for txin in inputs)))
-        hashOutputs = Hash(bfh(''.join(self.serialize_output(o) for o in outputs)))
+        hashPrevouts = Hash(b''.join(self.serialize_outpoint_bytes(txin) for txin in inputs))
+        hashSequence = Hash(b''.join(int_to_bytes(txin.get('sequence', 0xffffffff - 1), 4) for txin in inputs))
+        hashOutputs = Hash(b''.join(self.serialize_output_n_bytes(n) for n in range(n_outputs)))
 
         res = hashPrevouts, hashSequence, hashOutputs
         # cach resulting value, along with some minimal metadata to defensively
@@ -742,38 +746,53 @@ class Transaction:
         self._cached_sighash_tup = meta, res
         return res
 
-    def serialize_preimage(self, i, nHashType=0x00000041, use_cache = False):
+    def serialize_preimage_bytes(self, i, nHashType=0x00000041, use_cache=False) -> bytes:
         """ See `.calc_common_sighash` for explanation of use_cache feature """
         if (nHashType & 0xff) != 0x41:
             raise ValueError("other hashtypes not supported; submit a PR to fix this!")
 
-        nVersion = int_to_hex(self.version, 4)
-        nHashType = int_to_hex(nHashType, 4)
-        nLocktime = int_to_hex(self.locktime, 4)
+        nVersion = int_to_bytes(self.version, 4)
+        nHashType = int_to_bytes(nHashType, 4)
+        nLocktime = int_to_bytes(self.locktime, 4)
 
         txin = self.inputs()[i]
-        outpoint = self.serialize_outpoint(txin)
-        preimage_script = self.get_preimage_script(txin)
-        scriptCode = var_int(len(preimage_script) // 2) + preimage_script
+        outpoint = self.serialize_outpoint_bytes(txin)
+        preimage_script = bfh(self.get_preimage_script(txin))
+        input_token = txin.get('token_data')
+        if input_token is not None:
+            serInputToken = token.PREFIX_BYTE + input_token.serialize()
+        else:
+            serInputToken = b''
+        scriptCode = var_int_bytes(len(preimage_script)) + preimage_script
         try:
-            amount = int_to_hex(txin['value'], 8)
+            amount = int_to_bytes(txin['value'], 8)
         except KeyError:
             raise InputValueMissing
-        nSequence = int_to_hex(txin.get('sequence', 0xffffffff - 1), 4)
+        nSequence = int_to_bytes(txin.get('sequence', 0xffffffff - 1), 4)
 
-        hashPrevouts, hashSequence, hashOutputs = self.calc_common_sighash(use_cache = use_cache)
+        hashPrevouts, hashSequence, hashOutputs = self.calc_common_sighash(use_cache=use_cache)
 
-        preimage = nVersion + bh2u(hashPrevouts) + bh2u(hashSequence) + outpoint + scriptCode + amount + nSequence + bh2u(hashOutputs) + nLocktime + nHashType
+        preimage = (nVersion + hashPrevouts + hashSequence + outpoint + serInputToken + scriptCode + amount + nSequence
+                    + hashOutputs + nLocktime + nHashType)
         return preimage
 
-    def serialize(self, estimate_size=False):
-        nVersion = int_to_hex(self.version, 4)
-        nLocktime = int_to_hex(self.locktime, 4)
+    def serialize_preimage(self, i, nHashType=0x00000041, use_cache=False) -> str:
+        return self.serialize_preimage_bytes(i, nHashType, use_cache).hex()
+
+    def serialize_bytes(self, estimate_size=False) -> bytes:
+        nVersion = int_to_bytes(self.version, 4)
+        nLocktime = int_to_bytes(self.locktime, 4)
         inputs = self.inputs()
-        outputs = self.outputs()
-        txins = var_int(len(inputs)) + ''.join(self.serialize_input(txin, self.input_script(txin, estimate_size, self._sign_schnorr), estimate_size) for txin in inputs)
-        txouts = var_int(len(outputs)) + ''.join(self.serialize_output(o) for o in outputs)
+        n_outputs = len(self.outputs())
+        txins = var_int_bytes(len(inputs)) + b''.join(
+            self.serialize_input_bytes(txin, bfh(self.input_script(txin, estimate_size, self._sign_schnorr)),
+                                       estimate_size)
+            for txin in inputs)
+        txouts = var_int_bytes(n_outputs) + b''.join(self.serialize_output_n_bytes(n) for n in range(n_outputs))
         return nVersion + txins + txouts + nLocktime
+
+    def serialize(self, estimate_size=False) -> str:
+        return self.serialize_bytes(estimate_size=estimate_size).hex()
 
     def hash(self):
         warnings.warn("warning: deprecated tx.hash()", FutureWarning, stacklevel=2)
@@ -782,40 +801,51 @@ class Transaction:
     def txid(self):
         if not self.is_complete():
             return None
-        ser = self.serialize()
-        return self._txid(ser)
+        ser = self.serialize_bytes()
+        return self._txid_bytes(ser)[::-1].hex()
 
     def txid_fast(self):
-        ''' Returns the txid by immediately calculating it from self.raw,
+        """ Returns the txid by immediately calculating it from self.raw,
         which is faster than calling txid() which does a full re-serialize
         each time.  Note this should only be used for tx's that you KNOW are
         complete and that don't contain our funny serialization hacks.
 
         (The is_complete check is also not performed here because that
-        potentially can lead to unwanted tx deserialization). '''
+        potentially can lead to unwanted tx deserialization). """
         if self.raw:
             return self._txid(self.raw)
         return self.txid()
 
+    @classmethod
+    def _txid(cls, raw_hex: str) -> str:
+        return cls._txid_bytes(bfh(raw_hex))[::-1].hex()
+
     @staticmethod
-    def _txid(raw_hex : str) -> str:
-        return bh2u(Hash(bfh(raw_hex))[::-1])
+    def _txid_bytes(raw: bytes) -> bytes:
+        return Hash(raw)
 
     def add_inputs(self, inputs):
         self._inputs.extend(inputs)
         self.raw = None
+        self.invalidate_common_sighash_cache()
 
-    def add_outputs(self, outputs):
+    def add_outputs(self, outputs, token_datas=None):
         assert all(isinstance(output[1], (PublicKey, Address, ScriptOutput))
                    for output in outputs)
+        if token_datas is None:
+            token_datas = []
+        if len(token_datas) < len(outputs):
+            token_datas = [None] * (len(outputs) - len(token_datas))
         self._outputs.extend(outputs)
+        self._token_datas.extend(token_datas)
         self.raw = None
+        self.invalidate_common_sighash_cache()
 
     def input_value(self):
-        ''' Will return the sum of all input values, if the input values
+        """ Will return the sum of all input values, if the input values
         are known (may consult self.fetched_inputs() to get a better idea of
         possible input values).  Will raise InputValueMissing if input values
-        are missing. '''
+        are missing. """
         try:
             return sum(x['value'] for x in (self.fetched_inputs() or self.inputs()))
         except (KeyError, TypeError, ValueError) as e:
@@ -825,9 +855,9 @@ class Transaction:
         return sum(val for tp, addr, val in self.outputs())
 
     def get_fee(self):
-        ''' Try and calculate the fee based on the input data, and returns it as
+        """ Try and calculate the fee based on the input data, and returns it as
         fixoshis (int). Can raise InputValueMissing on tx's where fee data is
-        missing, so client code should catch that. '''
+        missing, so client code should catch that. """
         # first, check if coinbase; coinbase tx always has 0 fee
         if self.inputs() and self._inputs[0].get('type') == 'coinbase':
             return 0
@@ -836,15 +866,17 @@ class Transaction:
 
     @profiler
     def estimated_size(self):
-        '''Return an estimated tx size in bytes.'''
-        return (len(self.serialize(True)) // 2 if not self.is_complete() or self.raw is None
-                else len(self.raw) // 2)  # ASCII hex string
+        """Return an estimated tx size in bytes."""
+        if not self.is_complete() or self.raw is None:
+            return len(self.serialize_bytes(True))
+        else:
+            return len(self.raw) // 2  # ASCII hex string
 
     @classmethod
-    def estimated_input_size(self, txin, sign_schnorr=False):
-        '''Return an estimated of serialized input size in bytes.'''
-        script = self.input_script(txin, True, sign_schnorr=sign_schnorr)
-        return len(self.serialize_input(txin, script, True)) // 2  # ASCII hex string
+    def estimated_input_size(cls, txin, sign_schnorr=False):
+        """Return an estimated of serialized input size in bytes."""
+        script = bfh(cls.input_script(txin, True, sign_schnorr=sign_schnorr))
+        return len(cls.serialize_input_bytes(txin, script, True))
 
     def signature_count(self):
         r = 0
@@ -863,13 +895,13 @@ class Transaction:
 
     @staticmethod
     def verify_signature(pubkey, sig, msghash, reason=None):
-        ''' Given a pubkey (bytes), signature (bytes -- without sighash byte),
+        """ Given a pubkey (bytes), signature (bytes -- without sighash byte),
         and a sha256d message digest, returns True iff the signature is good
         for the given public key, False otherwise.  Does not raise normally
         unless given bad or garbage arguments.
 
         Optional arg 'reason' should be a list which will have a string pushed
-        at the front (failure reason) on False return. '''
+        at the front (failure reason) on False return. """
         if (any(not arg or not isinstance(arg, bytes) for arg in (pubkey, sig, msghash))
                 or len(msghash) != 32):
             raise ValueError('bad arguments to verify_signature')
@@ -897,26 +929,25 @@ class Transaction:
                     reason.insert(0, repr(e))
             return False
 
-
     @staticmethod
     def _ecdsa_sign(sec, pre_hash):
         pkey = regenerate_key(sec)
         secexp = pkey.secret
-        private_key = MySigningKey.from_secret_exponent(secexp, curve = SECP256k1)
+        private_key = MySigningKey.from_secret_exponent(secexp, curve=SECP256k1)
         public_key = private_key.get_verifying_key()
-        sig = private_key.sign_digest_deterministic(pre_hash, hashfunc=hashlib.sha256, sigencode = ecdsa.util.sigencode_der)
-        assert public_key.verify_digest(sig, pre_hash, sigdecode = ecdsa.util.sigdecode_der)
+        sig = private_key.sign_digest_deterministic(pre_hash, hashfunc=hashlib.sha256,
+                                                    sigencode=ecdsa.util.sigencode_der)
+        assert public_key.verify_digest(sig, pre_hash, sigdecode=ecdsa.util.sigdecode_der)
         return sig
 
     @staticmethod
-    def _schnorr_sign(pubkey, sec, pre_hash):
+    def _schnorr_sign(pubkey, sec, pre_hash, *, ndata=None):
         pubkey = bytes.fromhex(pubkey)
-        sig = schnorr.sign(sec, pre_hash)
+        sig = schnorr.sign(sec, pre_hash, ndata=ndata)
         assert schnorr.verify(pubkey, sig, pre_hash)  # verify what we just signed
         return sig
 
-
-    def sign(self, keypairs, *, use_cache=False):
+    def sign(self, keypairs, *, use_cache=False, ndata=None):
         for i, txin in enumerate(self.inputs()):
             pubkeys, x_pubkeys = self.get_sorted_pubkeys(txin)
             for j, (pubkey, x_pubkey) in enumerate(zip(pubkeys, x_pubkeys)):
@@ -933,18 +964,18 @@ class Transaction:
                     continue
                 print_error(f"adding signature for input#{i} sig#{j}; {kname}: {_pubkey} schnorr: {self._sign_schnorr}")
                 sec, compressed = keypairs.get(_pubkey)
-                self._sign_txin(i, j, sec, compressed, use_cache=use_cache)
+                self._sign_txin(i, j, sec, compressed, use_cache=use_cache, ndata=ndata)
         print_error("is_complete", self.is_complete())
         self.raw = self.serialize()
 
-    def _sign_txin(self, i, j, sec, compressed, *, use_cache=False):
-        '''Note: precondition is self._inputs is valid (ie: tx is already deserialized)'''
+    def _sign_txin(self, i, j, sec, compressed, *, use_cache=False, ndata=None):
+        """Note: precondition is self._inputs is valid (ie: tx is already deserialized)"""
         pubkey = public_key_from_private_key(sec, compressed)
         # add signature
-        nHashType = 0x00000041 # hardcoded, perhaps should be taken from unsigned input dict
-        pre_hash = Hash(bfh(self.serialize_preimage(i, nHashType, use_cache=use_cache)))
+        nHashType = 0x00000041  # hardcoded, perhaps should be taken from unsigned input dict
+        pre_hash = Hash(self.serialize_preimage_bytes(i, nHashType, use_cache=use_cache))
         if self._sign_schnorr:
-            sig = self._schnorr_sign(pubkey, sec, pre_hash)
+            sig = self._schnorr_sign(pubkey, sec, pre_hash, ndata=ndata)
         else:
             sig = self._ecdsa_sign(sec, pre_hash)
         reason = []
@@ -953,19 +984,14 @@ class Transaction:
             return None
         txin = self._inputs[i]
         txin['signatures'][j] = bh2u(sig + bytes((nHashType & 0xff,)))
-        txin['pubkeys'][j] = pubkey # needed for fd keys
+        txin['pubkeys'][j] = pubkey  # needed for fd keys
         return txin
 
     def get_outputs(self):
-        """convert pubkeys to addresses"""
-        o = []
-        for type, addr, v in self.outputs():
-            o.append((addr,v))      # consider using yield (addr, v)
-        return o
+        return [(addr, value) for _, addr, value in self.outputs()]
 
     def get_output_addresses(self):
-        return [addr for addr, val in self.get_outputs()]
-
+        return [addr for addr, value in self.get_outputs()]
 
     def has_address(self, addr):
         return (addr in self.get_output_addresses()) or (addr in (tx.get("address") for tx in self.inputs()))
@@ -973,7 +999,6 @@ class Transaction:
     def is_final(self):
         return not any([x.get('sequence', 0xffffffff - 1) < 0xffffffff - 1
                         for x in self.inputs()])
-
 
     def as_dict(self):
         if self.raw is None:
@@ -1003,7 +1028,7 @@ class Transaction:
 
     def fetch_input_data(self, wallet, done_callback=None, done_args=tuple(),
                          prog_callback=None, *, force=False, use_network=True):
-        '''
+        """
         Fetch all input data and put it in the 'ephemeral' dictionary, under
         'fetched_inputs'. This call potentially initiates fetching of
         prevout_hash transactions from the network for all inputs to this tx.
@@ -1031,7 +1056,7 @@ class Transaction:
         asynchronous fetch operation (if active) to be canceled and only the
         latest call will result in the invocation of the done_callback if/when
         it completes.
-        '''
+        """
         if not self._inputs:
             return False
         if force:
@@ -1057,7 +1082,7 @@ class Transaction:
         cls = __class__
         self_txid = self.txid()
         def doIt():
-            '''
+            """
             This function is seemingly complex, but it's really conceptually
             simple:
             1. Fetch all prevouts either from cache (wallet or global tx_cache)
@@ -1068,11 +1093,11 @@ class Transaction:
 
             Tested with a huge tx of 600+ inputs all coming from different
             prevout_hashes on mainnet, and it's super fast:
-            cd8fcc8ad75267ff9ad314e770a66a9e871be7882b7c05a7e5271c46bfca98bc '''
+            cd8fcc8ad75267ff9ad314e770a66a9e871be7882b7c05a7e5271c46bfca98bc """
             last_prog = -9999.0
             need_dl_txids = defaultdict(list)  # the dict of txids we will need to download (wasn't in cache)
             def prog(i, prog_total=100):
-                ''' notify interested code about progress '''
+                """ notify interested code about progress """
                 nonlocal last_prog
                 if prog_callback:
                     prog = ((i+1)*100.0)/prog_total
@@ -1120,9 +1145,11 @@ class Transaction:
                     if tx:
                         if n < len(tx.outputs()):
                             outp = tx.outputs()[n]
+                            token_data = tx.token_datas()[n]
                             addr, value = outp[1], outp[2]
                             inp['value'] = value
                             inp['address'] = addr
+                            inp['token_data'] = token_data
                             print_error("fetch_input_data: fetched cached", i, addr, value)
                         else:
                             print_error("fetch_input_data: ** FIXME ** should never happen -- n={} >= len(tx.outputs())={} for prevout {}".format(n, len(tx.outputs()), prevout_hash))
@@ -1146,10 +1173,10 @@ class Transaction:
                     q_ct = 0
                     bad_txids = set()
                     def put_in_queue_and_cache(r):
-                        ''' we cache the results directly in the network callback
+                        """ we cache the results directly in the network callback
                         as even if the user cancels the operation, we would like
                         to save the returned tx in our cache, since we did the
-                        work to retrieve it anyway. '''
+                        work to retrieve it anyway. """
                         q.put(r)  # put the result in the queue no matter what it is
                         txid = ''
                         try:
@@ -1226,11 +1253,13 @@ class Transaction:
                             for item in need_dl_txids[txid]:
                                 ii, n = item
                                 assert n < len(tx.outputs())
-                                outp = tx.outputs()[n]
+                                tup = tx.outputs(tokens=True)[n]
+                                outp, token_data = tup
                                 addr, value = outp[1], outp[2]
                                 inps[ii]['value'] = value
                                 inps[ii]['address'] = addr
-                                print_error("fetch_input_data: fetched from network", ii, addr, value)
+                                inps[ii]['token_data'] = token_data
+                                print_error("fetch_input_data: fetched from network", ii, addr, value, token_data)
                             prog(i, q_ct)  # tell interested code of progress
                         except queue.Empty:
                             print_error("fetch_input_data: timed out after 10.0s fetching from network, giving up.")
@@ -1254,7 +1283,7 @@ class Transaction:
         return True
 
     def fetched_inputs(self, *, require_complete=False):
-        ''' Returns the complete list of asynchronously fetched inputs for
+        """ Returns the complete list of asynchronously fetched inputs for
         this tx, if they exist. If the list is not yet fully retrieved, and
         require_complete == False, returns what it has so far
         (the returned list will always be exactly equal to len(self._inputs),
@@ -1265,7 +1294,7 @@ class Transaction:
         empty list [].
 
         Note that some inputs may still lack key: 'value' if there was a network
-        error in retrieving them or if the download is still in progress.'''
+        error in retrieving them or if the download is still in progress."""
         if self._inputs:
             ret = self.ephemeral.get('fetched_inputs') or []
             diff = len(self._inputs) - len(ret)
@@ -1278,14 +1307,14 @@ class Transaction:
         return []
 
     def fetch_cancel(self) -> bool:
-        ''' Cancels the currently-active running fetch operation, if any '''
+        """ Cancels the currently-active running fetch operation, if any """
         return bool(self.ephemeral.pop('_fetch', None))
 
     @classmethod
     def tx_cache_get(cls, txid : str) -> object:
-        ''' Attempts to retrieve txid from the tx cache that this class
+        """ Attempts to retrieve txid from the tx cache that this class
         keeps in-memory.  Returns None on failure. The returned tx is
-        not deserialized, and is a copy of the one in the cache. '''
+        not deserialized, and is a copy of the one in the cache. """
         tx = cls._fetched_tx_cache.get(txid)
         if tx is not None and tx.raw:
             # make sure to return a copy of the transaction from the cache
@@ -1297,7 +1326,7 @@ class Transaction:
 
     @classmethod
     def tx_cache_put(cls, tx : object, txid : str = None):
-        ''' Puts a non-deserialized copy of tx into the tx_cache. '''
+        """ Puts a non-deserialized copy of tx into the tx_cache. """
         if not tx or not tx.raw:
             raise ValueError('Please pass a tx which has a valid .raw attribute!')
         txid = txid or cls._txid(tx.raw)  # optionally, caller can pass-in txid to save CPU time for hashing
@@ -1305,7 +1334,7 @@ class Transaction:
 
 
 def tx_from_str(txt):
-    "json or raw hexadecimal"
+    """json or raw hexadecimal"""
     import json
     txt = txt.strip()
     if not txt:
@@ -1324,13 +1353,15 @@ def tx_from_str(txt):
 
 # ---
 class OPReturn:
-    ''' OPReturn helper namespace. Used by GUI main_window.py and also
-    oregano/commands.py '''
+    """ OPReturn helper namespace. Used by GUI main_window.py and also
+    oregano/commands.py """
     class Error(Exception):
         """ thrown when the OP_RETURN for a tx not of the right format """
 
     class TooLarge(Error):
         """ thrown when the OP_RETURN for a tx is >220 bytes """
+
+    no_length_check = False
 
     @staticmethod
     def output_for_stringdata(op_return):
@@ -1339,7 +1370,7 @@ class OPReturn:
             raise OPReturn.Error('OP_RETURN parameter needs to be of type str!')
         op_return_code = "OP_RETURN "
         op_return_encoded = op_return.encode('utf-8')
-        if len(op_return_encoded) > 220:
+        if not OPReturn.no_length_check and len(op_return_encoded) > 220:
             raise OPReturn.TooLarge(_("OP_RETURN message too large, needs to be no longer than 220 bytes"))
         op_return_payload = op_return_encoded.hex()
         script = op_return_code + op_return_payload

@@ -15,6 +15,7 @@ val WATCHDOG_INTERVAL = 1000L
 
 lateinit var daemonModel: DaemonModel
 val daemonUpdate = MutableLiveData<Unit>().apply { value = Unit }
+val fusionUpdate = MutableLiveData<Unit>().apply { value = Unit }
 
 
 fun initDaemon(config: PyObject) {
@@ -32,8 +33,14 @@ class DaemonModel(val config: PyObject) {
     val walletName: String?
         get() {
             val wallet = this.wallet
-            return if (wallet == null) null else wallet.callAttr("basename").toString()
+            return wallet?.callAttr("basename")?.toString()
         }
+    val walletType: String?
+        get() {
+            return if (wallet == null) null else commands.callAttr("get", "wallet_type").toString()
+        }
+    val scriptType: String?
+        get() = wallet?.get("txin_type").toString()
 
     lateinit var watchdog: Runnable
 
@@ -50,6 +57,7 @@ class DaemonModel(val config: PyObject) {
                 }
             }
             mainHandler.postDelayed(watchdog, WATCHDOG_INTERVAL)
+            fusionUpdate.postValue(Unit)
         }
         watchdog.run()
     }
@@ -63,6 +71,12 @@ class DaemonModel(val config: PyObject) {
     }
 
     fun isConnected() = network.callAttr("is_connected").toBoolean()
+
+    /** This should be called before doing anything which blocks the UI waiting for the
+     * network. Otherwise it would probably hang for 30 seconds until it timed out. */
+    fun assertConnected() {
+        if (!isConnected()) throw ToastException(R.string.not_connected)
+    }
 
     fun listWallets(): List<String> {
         return commands.callAttr("list_wallets").asList().map { it.toString() }

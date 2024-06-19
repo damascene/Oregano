@@ -5,7 +5,7 @@
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation files
 # (the "Software"), to deal in the Software without restriction,
-# including without limitation the rights to use, copy, modify, merge,
+# includindg without limitation the rights to use, copy, modify, merge,
 # publish, distribute, sublicense, and/or sell copies of the Software,
 # and to permit persons to whom the Software is furnished to do so,
 # subject to the following conditions:
@@ -34,7 +34,7 @@ from collections import defaultdict
 import threading
 import socket
 import json
-from typing import Dict
+from typing import Dict, Iterable, Tuple
 
 import socks
 from . import util
@@ -221,7 +221,7 @@ class Network(util.DaemonThread):
           is_connected(), set_parameters(), stop()
     """
 
-    INSTANCE = None # Only 1 Network instance is ever alive during app lifetime (it's a singleton)
+    INSTANCE = None  # Only 1 Network instance is ever alive during app lifetime (it's a singleton)
 
     # These defaults are decent for the desktop app. Other platforms may
     # override these at any time (iOS sets these to lower values).
@@ -235,6 +235,7 @@ class Network(util.DaemonThread):
         if config is None:
             config = {}  # Do not use mutables as default values!
         util.DaemonThread.__init__(self)
+        self.name = "Net" + self.name
         self.config = SimpleConfig(config) if isinstance(config, dict) else config
         self.num_server = 10 if not self.config.get('oneserver') else 0
         self.blockchains = blockchain.read_blockchains(self.config)
@@ -254,7 +255,7 @@ class Network(util.DaemonThread):
         self.tor_controller.active_port_changed.append(self.on_tor_port_changed)
         self.tor_controller.start()
 
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         # locks: if you need to take multiple ones, acquire them in the order they are defined here!
         self.interface_lock = threading.RLock()            # <- re-entrant
         self.pending_sends_lock = threading.Lock()
@@ -275,6 +276,7 @@ class Network(util.DaemonThread):
 
         self.banner = ''
         self.donation_address = ''
+        self.features = None
         self.relay_fee = None
         # callbacks passed with subscriptions
         self.subscriptions = defaultdict(list)
@@ -306,7 +308,7 @@ class Network(util.DaemonThread):
         if Network.INSTANCE:
             # This happens on iOS which kills and restarts the daemon on app sleep/wake
             self.print_error("A new instance has started and is replacing the old one.")
-        Network.INSTANCE = self # This implicitly should force stale instances to eventually del
+        Network.INSTANCE = self  # This implicitly should force stale instances to eventually del
         self.start_network(deserialize_server(self.default_server)[2], deserialize_proxy(self.config.get('proxy')))
 
     def on_tor_port_changed(self, controller: TorController):
@@ -328,8 +330,8 @@ class Network(util.DaemonThread):
             this code isn't normally reached, except for in the iOS
             implementation, which kills the daemon and the network before app
             sleep, and creates a new daemon and netwok on app awake. """
-        if Network.INSTANCE is self: # This check is important for iOS
-            Network.INSTANCE = None # <--- Not normally reached, but here for completeness.
+        if Network.INSTANCE is self:  # This check is important for iOS
+            Network.INSTANCE = None  # <--- Not normally reached, but here for completeness.
         else:
             self.print_error("Stale instance deallocated")
         if hasattr(super(), '__del__'):
@@ -418,7 +420,8 @@ class Network(util.DaemonThread):
             pass
 
     def get_server_height(self):
-        return self.interface.tip if self.interface else 0
+        with self.interface_lock:
+            return self.interface.tip if self.interface else 0
 
     def server_is_lagging(self):
         sh = self.get_server_height()
@@ -491,10 +494,11 @@ class Network(util.DaemonThread):
         old_reqs = self.unanswered_requests
         self.unanswered_requests = {}
         for m_id, request in old_reqs.items():
-            message_id = self.queue_request(request[0], request[1], callback = request[2])
+            message_id = self.queue_request(request[0], request[1], callback=request[2])
             assert message_id is not None
         self.queue_request('server.banner', [])
         self.queue_request('server.donation_address', [])
+        self.queue_request('server.features', [])
         self.queue_request('server.peers.subscribe', [])
         #self.request_fee_estimates()  # We disable fee estimates globally in this app for now. XRG doesn't need them and they create more user confusion than anything.
         self.queue_request('blockchain.relayfee', [])
@@ -548,6 +552,8 @@ class Network(util.DaemonThread):
             value = self.get_interfaces()
         elif key == 'proxy':
             value = (self.proxy and self.proxy.copy()) or None
+        elif key =='features':
+            value = self.features
         else:
             raise RuntimeError('unexpected trigger key {}'.format(key))
         return value
@@ -805,7 +811,7 @@ class Network(util.DaemonThread):
         if method == 'server.version':
             if isinstance(result, list):
                 self.on_server_version(interface, result)
-        elif method == 'blockchain.headers.subscribe':
+        if method == 'blockchain.headers.subscribe':
             if error is None:
                 # on_notify_header below validates result is right type or format
                 self.on_notify_header(interface, result)
@@ -823,6 +829,10 @@ class Network(util.DaemonThread):
         elif method == 'server.donation_address':
             if error is None and isinstance(result, str):
                 self.donation_address = result
+        elif method == 'server.features':
+            if error is None and isinstance(result, dict):
+                self.features = result
+                self.notify('features')
         elif method == 'blockchain.estimatefee':
             try:
                 if error is None and isinstance(result, (int, float)) and result > 0:
@@ -856,9 +866,14 @@ class Network(util.DaemonThread):
         for callback in callbacks:
             callback(response)
 
-    def get_index(self, method, params):
+    @staticmethod
+    def get_index(method, params):
         """ hashable index for subscriptions and cache"""
-        return str(method) + (':' + str(params[0]) if params else '')
+        if params and isinstance(params, (list, tuple)):
+            params_part = str(params[0])
+        else:
+            params_part = ''
+        return str(method) + ':' + params_part
 
     def process_responses(self, interface):
         responses = interface.get_responses()
@@ -884,7 +899,7 @@ class Network(util.DaemonThread):
                 response['params'] = params
                 # Only once we've received a response to an addr subscription
                 # add it to the list; avoids double-sends on reconnection
-                if method == 'blockchain.scripthash.subscribe':
+                if method == 'blockchain.scripthash.subscribe' and params and isinstance(params, (list, tuple)):
                     self.subscribed_addresses.add(params[0])
             else:
                 if not response:  # Closed remotely / misbehaving
@@ -894,12 +909,13 @@ class Network(util.DaemonThread):
                 method = response.get('method')
                 params = response.get('params')
                 k = self.get_index(method, params)
-                if method == 'blockchain.headers.subscribe':
-                    response['result'] = params[0]
-                    response['params'] = []
-                elif method == 'blockchain.scripthash.subscribe':
-                    response['params'] = [params[0]]  # addr
-                    response['result'] = params[1]
+                if params and isinstance(params, (list, tuple)):  # Guard against 'dict' or empty params
+                    if method == 'blockchain.headers.subscribe':
+                        response['result'] = params[0]
+                        response['params'] = []
+                    elif method == 'blockchain.scripthash.subscribe':
+                        response['params'] = [params[0]]  # addr
+                        response['result'] = params[1]
                 callbacks = self.subscriptions.get(k, [])
 
             # update cache if it's a subscription
@@ -909,10 +925,42 @@ class Network(util.DaemonThread):
             # Response is now in canonical form
             self.process_response(interface, request, response, callbacks)
 
-    def subscribe_to_scripthashes(self, scripthashes, callback):
+    def subscribe_to_scripthashes(self, scripthashes: Iterable[str], callback):
         msgs = [('blockchain.scripthash.subscribe', [sh])
                 for sh in scripthashes]
         self.send(msgs, callback)
+
+    def unsubscribe_from_scripthashes(self, scripthashes: Iterable[str], callback):
+        method_sub = 'blockchain.scripthash.subscribe'
+        msgs = []
+        for sh in scripthashes:
+            params = [sh]
+            k = self.get_index(method_sub, params)
+            with self.lock:
+                # Clear any potential previously-queued subscription request
+                self.cancel_requests(callback, method=method_sub, params=params)
+                # See if this would have been the last callback
+                callbacks = self.subscriptions.get(k, None)
+                if isinstance(callbacks, (list, set)):
+                    # "refct" of the subscription is now 0
+                    try:
+                        callbacks.remove(callback)
+                    except (ValueError, KeyError):
+                        pass
+                if not callbacks:
+                    msgs.append(('blockchain.scripthash.unsubscribe', params))
+                    self.subscriptions.pop(k, None)
+                    self.subscribed_addresses.discard(sh)
+                    with self.interface_lock:
+                        self.sub_cache.pop(k, None)
+        if msgs:
+            def unsub_callback(response):
+                method = response.get('method')
+                result = response.get('result')
+                sh = response.get('params', [None])[0]
+                self.print_error(f"Got {method} response for {sh}: {result}")
+            self.print_error(f"Sending unsub for {len(msgs)} scripthash(es) ...")
+            self.send(msgs, unsub_callback)
 
     def request_scripthash_history(self, sh, callback):
         self.send([('blockchain.scripthash.get_history', [sh])], callback)
@@ -920,9 +968,11 @@ class Network(util.DaemonThread):
     def send(self, messages, callback):
         """Messages is a list of (method, params) tuples"""
         messages = list(messages)
-        if messages: # Guard against empty message-list which is a no-op and just wastes CPU to enque/dequeue (not even callback is called). I've seen the code send empty message lists before in synchronizer.py
+        # Guard against empty message-list which is a no-op and just wastes CPU to enqueue/dequeue (not even callback is
+        # called). I've seen the code send empty message lists before in synchronizer.py
+        if messages:
             with self.pending_sends_lock:
-                self.pending_sends.append((messages, callback))
+               self.pending_sends.append((messages, callback))
 
     def process_pending_sends(self):
         # Requests needs connectivity.  If we don't have an interface,
@@ -940,7 +990,7 @@ class Network(util.DaemonThread):
                 if method.endswith('.subscribe'):
                     k = self.get_index(method, params)
                     # add callback to list
-                    l = self.subscriptions[k] # <-- it's a defaultdict(list)
+                    l = self.subscriptions[k]  # <-- it's a defaultdict(list)
                     if callback not in l:
                         l.append(callback)
                     # check cached response for subscriptions
@@ -949,22 +999,43 @@ class Network(util.DaemonThread):
                     util.print_error("cache hit", k)
                     callback(r)
                 else:
-                    self.queue_request(method, params, callback = callback)
+                    self.queue_request(method, params, callback=callback)
 
-    def _cancel_pending_sends(self, callback):
+    def _cancel_pending_sends(self, callback, *, method=None, params=None) -> Tuple[int, int]:
         ct = 0
+        nmsgs = 0
         with self.pending_sends_lock:
+            idx = 0
             for item in self.pending_sends.copy():
+                do_delete = False
                 messages, _callback = item
                 if callback == _callback:
-                    self.pending_sends.remove(item)
+                    if method is None and params is None:
+                        do_delete = True
+                        nmsgs += len(messages)
+                    else:
+                        # Clean out pending sends that match "method" and/or "params"
+                        idx2 = 0
+                        for _method, _params in messages.copy():
+                            if (method is None or _method == method) and (params is None or _params == params):
+                                del messages[idx2]
+                                nmsgs += 1
+                            else:
+                                idx2 += 1
+                        if not messages:
+                            # Set of messages is empty, delete the entire blob
+                            do_delete = True
+                if do_delete:
+                    del self.pending_sends[idx]
                     ct += 1
-        return ct
+                else:
+                    idx += 1
+        return ct, nmsgs
 
     def unsubscribe(self, callback):
-        '''Unsubscribe a callback to free object references to enable GC.
+        """Unsubscribe a callback to free object references to enable GC.
         It is advised that this function only be called from the network thread
-        to avoid race conditions.'''
+        to avoid race conditions."""
         # Note: we can't unsubscribe from the server, so if we receive
         # subsequent notifications, they will be safely ignored as
         # no callbacks will exist to process them. For subscriptions we will
@@ -979,27 +1050,34 @@ class Network(util.DaemonThread):
                         # remove empty list
                         self.subscriptions.pop(k, None)
                     ct += 1
-        ct2 = self._cancel_pending_sends(callback)
-        if ct or ct2:
+        ct2, ct3 = self._cancel_pending_sends(callback)
+        if ct or ct2 or ct3:
             qname = getattr(callback, '__qualname__', '<unknown>')
-            self.print_error("Removed {} subscription callbacks and {} pending sends for callback: {}".format(ct, ct2, qname))
+            self.print_error(f"Removed {ct} subscription callbacks and {ct2} pending sends (nmsgs={ct3}) for"
+                             f" callback: {qname}")
 
-    def cancel_requests(self, callback):
-        '''Remove a callback to free object references to enable GC.
+    def cancel_requests(self, callback, *, method=None, params=None):
+        """Remove a callback to free object references to enable GC.
         It is advised that this function only be called from the network thread
-        to avoid race conditions.'''
+        to avoid race conditions."""
         # If the interface ends up answering these requests, they will just
         # be safely ignored. This is better than the alternative which is to
         # keep references to an object that declared itself defunct.
         ct = 0
         for message_id, client_req in self.unanswered_requests.copy().items():
-            if callback == client_req[2]:
-                self.unanswered_requests.pop(message_id, None) # guard against race conditions here. Note: this usually is called from the network thread but who knows what future programmers may do. :)
-                ct += 1
-        ct2 = self._cancel_pending_sends(callback)
-        if ct or ct2:
+            _method, _params, _callback = client_req
+            if callback == _callback:
+                do_delete = (method is None or _method == method) and (params is None or _params == params)
+                if do_delete:
+                    # guard against race conditions here. Note: this usually is called from the network thread but who
+                    # knows what future programmers may do. :)
+                    self.unanswered_requests.pop(message_id, None)
+                    ct += 1
+        ct2, ct3 = self._cancel_pending_sends(callback, method=method, params=params)
+        if ct or ct2 or ct3:
             qname = getattr(callback, '__qualname__', repr(callback))
-            self.print_error("Removed {} unanswered client requests and {} pending sends for callback: {}".format(ct, ct2, qname))
+            self.print_error(f"Removed {ct} unanswered client requests and {ct2} pending sends (nmsgs={ct3}) for"
+                             f" callback: {qname}")
 
     def connection_down(self, server, blacklist=False):
         '''A connection to server either went down, or was never made.
@@ -1181,7 +1259,12 @@ class Network(util.DaemonThread):
             return
 
         verification_top_height = self.checkpoint_servers_verified.get(interface.server, {}).get('height', None)
-        was_verification_request = verification_top_height and request_base_height == verification_top_height - 147 + 1 and actual_header_count == 147
+        was_verification_request = False
+        if verification_top_height is not None:
+            if not networks.net.REGTEST:
+                was_verification_request = request_base_height == verification_top_height - 147 + 1 and actual_header_count == 147
+            else:
+                was_verification_request = request_base_height == verification_top_height - 50 + 1 and actual_header_count == 50
 
         initial_interface_mode = interface.mode
         if interface.mode == Interface.MODE_VERIFICATION:
@@ -1265,6 +1348,8 @@ class Network(util.DaemonThread):
             params = [height, networks.net.VERIFICATION_BLOCK_HEIGHT]
         self.queue_request('blockchain.block.header', params, interface)
         return True
+
+
 
     def on_header(self, interface, request, response):
         """Handle receiving a single block header"""
@@ -1620,7 +1705,10 @@ class Network(util.DaemonThread):
                 self.checkpoint_height = interface.tip - 100
             self.checkpoint_servers_verified[interface.server] = { 'root': None, 'height': self.checkpoint_height }
             # We need at least 147 headers before the post checkpoint headers for daa calculations.
-            self._request_headers(interface, self.checkpoint_height - 147 + 1, 147, self.checkpoint_height)
+            if not networks.net.REGTEST:
+                self._request_headers(interface, self.checkpoint_height - 147 + 1, 147, self.checkpoint_height)
+            else:
+                self._request_headers(interface, self.checkpoint_height - 50 + 1, 50, self.checkpoint_height)
         else:
             # We already have them verified, maybe we got disconnected.
             interface.print_error("request_initial_proof_and_headers bypassed")
@@ -1673,21 +1761,23 @@ class Network(util.DaemonThread):
 
         Returns a boolean to represent whether the server's proof is correct.
         """
-        received_merkle_root = bytes(reversed(bfh(merkle_root)))
+        received_merkle_root = bfh(merkle_root)[::-1]
         if networks.net.VERIFICATION_BLOCK_MERKLE_ROOT:
-            expected_merkle_root = bytes(reversed(bfh(networks.net.VERIFICATION_BLOCK_MERKLE_ROOT)))
+            expected_merkle_root = bfh(networks.net.VERIFICATION_BLOCK_MERKLE_ROOT)[::-1]
         else:
             expected_merkle_root = received_merkle_root
 
         if received_merkle_root != expected_merkle_root:
-            interface.print_error("Sent unexpected merkle root, expected: {}, got: {}".format(networks.net.VERIFICATION_BLOCK_MERKLE_ROOT, merkle_root))
+            interface.print_error("Sent unexpected merkle root, expected: {}, got: {}"
+                                  .format(networks.net.VERIFICATION_BLOCK_MERKLE_ROOT, merkle_root))
             return False
 
         header_hash = Hash(bfh(header))
-        byte_branches = [ bytes(reversed(bfh(v))) for v in merkle_branch ]
+        byte_branches = [bfh(v)[::-1] for v in merkle_branch]
         proven_merkle_root = blockchain.root_from_proof(header_hash, byte_branches, header_height)
         if proven_merkle_root != expected_merkle_root:
-            interface.print_error("Sent incorrect merkle branch, expected: {}, proved: {}".format(networks.net.VERIFICATION_BLOCK_MERKLE_ROOT, util.hfu(reversed(proven_merkle_root))))
+            interface.print_error("Sent incorrect merkle branch, expected: {}, proved: {}"
+                                  .format(networks.net.VERIFICATION_BLOCK_MERKLE_ROOT, proven_merkle_root[::-1].hex()))
             return False
 
         return True
@@ -1887,6 +1977,8 @@ class Network(util.DaemonThread):
         elif r"absurdly-high-fee" in server_msg:
             return _("The transaction was rejected because it specifies an absurdly high fee.")
         elif r"non-mandatory-script-verify-flag" in server_msg or r"mandatory-script-verify-flag-failed" in server_msg or r"upgrade-conditional-script-failure" in server_msg:
+            if r"push larger than necessary" in server_msg:
+                return _("The transaction was rejected due to a non-minimal data push")
             return _("The transaction was rejected due to an error in script execution.")
         elif r"tx-size" in server_msg or r"bad-txns-oversize" in server_msg:
             return _("The transaction was rejected because it is too large (in bytes).")

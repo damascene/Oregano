@@ -6,10 +6,12 @@ import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.method.LinkMovementMethod
 import android.text.style.ClickableSpan
+import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuInflater
 import android.view.MenuItem
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.viewModels
@@ -18,8 +20,8 @@ import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModel
 import com.chaquo.python.Kwarg
 import com.chaquo.python.PyObject
-import kotlinx.android.synthetic.main.address_detail.*
-import kotlinx.android.synthetic.main.transactions.*
+import org.oregano.oregano3.databinding.AddressDetailBinding
+import org.oregano.oregano3.databinding.TransactionsBinding
 
 
 val guiAddresses by lazy { guiMod("addresses") }
@@ -113,29 +115,32 @@ class AddressDialog : DetailDialog() {
         AddressModel(wallet, clsAddress.callAttr("from_string",
                                                  arguments!!.getString("address")!!))
     }
+    private var _binding: AddressDetailBinding? = null
+    private val binding get() = _binding!!
 
     override fun onBuildDialog(builder: AlertDialog.Builder) {
+        _binding = AddressDetailBinding.inflate(LayoutInflater.from(context))
         with (builder) {
-            setView(R.layout.address_detail)
+            setView(binding.root)
             setNegativeButton(android.R.string.cancel, null)
             setPositiveButton(android.R.string.ok, { _, _  ->
                 setDescription(wallet, addrModel.toString("storage"),
-                               etDescription.text.toString())
+                               binding.etDescription.text.toString())
             })
         }
     }
 
     override fun onShowDialog() {
-        btnExplore.setOnClickListener {
+        binding.btnExplore.setOnClickListener {
             exploreAddress(activity!!, addrModel.addr)
         }
-        btnCopy.setOnClickListener {
+        binding.btnCopy.setOnClickListener {
             copyToClipboard(addrModel.toString("full_ui"), R.string.address)
         }
 
-        showQR(imgQR, addrModel.toString("full_ui"))
-        tvAddress.text = addrModel.toString("ui")
-        tvType.text = addrModel.type
+        showQR(binding.imgQR, addrModel.toString("full_ui"))
+        binding.tvAddress.text = addrModel.toString("ui")
+        binding.tvType.text = addrModel.type
 
         with (SpannableStringBuilder()) {
             append(addrModel.txCount.toString())
@@ -151,20 +156,37 @@ class AddressDialog : DetailDialog() {
                 append(link)
                 append(")")
             }
-            tvTxCount.text = this
+            binding.tvTxCount.text = this
         }
-        tvTxCount.movementMethod = LinkMovementMethod.getInstance()
+        binding.tvTxCount.movementMethod = LinkMovementMethod.getInstance()
 
-        tvBalance.text = ltr(formatSatoshisAndFiat(addrModel.balance))
+        binding.tvBalance.text = ltr(formatSatoshisAndFiat(addrModel.balance, commas=true))
     }
 
     override fun onFirstShowDialog() {
-        etDescription.setText(addrModel.description)
+        binding.etDescription.setText(addrModel.description)
     }
 }
 
 
 class AddressTransactionsDialog() : AlertDialogFragment() {
+    private var _binding: TransactionsBinding? = null
+    private val binding get() = _binding!!
+
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View? {
+        super.onCreateView(inflater, container, savedInstanceState)
+        _binding = TransactionsBinding.inflate(inflater, container, false)
+        return binding.root
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        _binding = null
+    }
     constructor(address: String) : this() {
         arguments = Bundle().apply { putString("address", address) }
     }
@@ -178,14 +200,14 @@ class AddressTransactionsDialog() : AlertDialogFragment() {
 
     override fun onShowDialog() {
         // Remove buttons and bottom padding.
-        btnSend.hide()
-        btnRequest.hide()
-        rvTransactions.setPadding(0, 0, 0, 0)
+        binding.btnSend.hide()
+        binding.btnRequest.hide()
+        binding.rvTransactions.setPadding(0, 0, 0, 0)
 
-        setupVerticalList(rvTransactions)
+        setupVerticalList(binding.rvTransactions)
         val addressDialog = targetFragment as AddressDialog
         val adapter = TransactionsAdapter(addressDialog.listFragment)
-        rvTransactions.adapter = adapter
+        binding.rvTransactions.adapter = adapter
         val addr = clsAddress.callAttr("from_string", arguments!!.getString("address")!!)
         val wallet = addressDialog.wallet
 

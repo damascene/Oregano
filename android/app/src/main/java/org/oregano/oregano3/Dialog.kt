@@ -20,9 +20,9 @@ import androidx.fragment.app.viewModels
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.observe
+import androidx.viewbinding.ViewBinding
 import com.chaquo.python.PyException
-import kotlinx.android.synthetic.main.password.*
-import kotlin.properties.Delegates.notNull
+import org.oregano.oregano3.databinding.PasswordBinding
 
 
 abstract class AlertDialogFragment : DialogFragment() {
@@ -34,6 +34,12 @@ abstract class AlertDialogFragment : DialogFragment() {
     var started = false
     var suppressView = false
     var focusOnStop = View.NO_ID
+    var childViewBinding: ViewBinding? = null
+    fun setArguments(block: Bundle.() -> Unit): AlertDialogFragment {
+        val args = arguments ?: Bundle()
+        setArguments(args.apply(block))
+        return this
+    }
 
     override fun onCreateDialog(savedInstanceState: Bundle?): AlertDialog {
         val builder = AlertDialog.Builder(context!!)
@@ -50,18 +56,11 @@ abstract class AlertDialogFragment : DialogFragment() {
     //     and Fragment.initLifecycle.
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?,
                               savedInstanceState: Bundle?): View? {
-        // This isn't really consistent with the fragment lifecycle, but it's the only way to
-        // make AlertDialog create its views.
-        dialog.show()
 
         // The top-level view structure isn't really documented, so make sure we are returning
         // the layout defined in
         // android/platform/frameworks/support/appcompat/res/layout/abc_alert_dialog_material.xml.
         val content = dialog.findViewById<ViewGroup>(android.R.id.content)!!.getChildAt(0)
-        val contentClassName = content.javaClass.name
-        if (contentClassName != "androidx.appcompat.widget.AlertDialogLayout") {
-            throw IllegalStateException("Unexpected content view $contentClassName")
-        }
         return content
     }
 
@@ -170,7 +169,7 @@ abstract class MenuDialog : AlertDialogFragment() {
         val menu = PopupMenu(app, null).menu
         onBuildDialog(builder, menu)
 
-        val items = ArrayList<CharSequence>()
+        val items = ArrayList<CharSequence?>()
         var checkedItem: Int? = null
         for (i in 0 until menu.size()) {
             val item = menu.getItem(i)
@@ -246,12 +245,8 @@ abstract class TaskDialog<Result> : DialogFragment() {
     private fun onFinished(body: () -> Unit) {
         if (model.state == Thread.State.RUNNABLE) {
             model.state = Thread.State.TERMINATED
-
-            // If we're inside onStart, fragment transactions are unsafe (#2154).
-            postToUiThread {
-                body()
-                dismiss()
-            }
+            body()
+            dismiss()
         }
     }
 
@@ -310,11 +305,15 @@ class LaunchedTaskDialog<Result> : TaskDialog<Result>() {
 
 
 abstract class PasswordDialog<Result> : TaskLauncherDialog<Result>() {
-    var password: String by notNull()
+    var password: String = ""
+    private var _binding: PasswordBinding? = null
+    private val binding get() = _binding!!
+
 
     override fun onBuildDialog(builder: AlertDialog.Builder) {
+        _binding = PasswordBinding.inflate(LayoutInflater.from(context))
         builder.setTitle(R.string.Enter_password)
-            .setView(R.layout.password)
+            .setView(binding.root)
             .setPositiveButton(android.R.string.ok, null)
             .setNegativeButton(android.R.string.cancel, null)
     }
@@ -327,7 +326,7 @@ abstract class PasswordDialog<Result> : TaskLauncherDialog<Result>() {
 
     override fun onShowDialog() {
         super.onShowDialog()
-        etPassword.setOnEditorActionListener { _, actionId: Int, event: KeyEvent? ->
+        binding.etPassword.setOnEditorActionListener { _, actionId: Int, event: KeyEvent? ->
             // See comments in ConsoleActivity.createInput.
             if (actionId == EditorInfo.IME_ACTION_DONE ||
                 event?.action == KeyEvent.ACTION_UP) {
@@ -338,7 +337,7 @@ abstract class PasswordDialog<Result> : TaskLauncherDialog<Result>() {
     }
 
     override fun onPreExecute() {
-        password = etPassword.text.toString()
+        password = binding.etPassword.text.toString()
     }
 
     override fun doInBackground(): Result {

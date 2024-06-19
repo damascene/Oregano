@@ -2,20 +2,39 @@ package org.oregano.oregano3
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import com.chaquo.python.Kwarg
 import com.chaquo.python.PyObject
 import com.google.zxing.integration.android.IntentIntegrator
-import kotlinx.android.synthetic.main.contact_detail.*
-import kotlinx.android.synthetic.main.contacts.*
+import org.oregano.oregano3.databinding.ContactDetailBinding
+import org.oregano.oregano3.databinding.ContactsBinding
 
 val guiContacts by lazy { guiMod("contacts") }
 val libContacts by lazy { libMod("contacts") }
 
 
 class ContactsFragment : ListFragment(R.layout.contacts, R.id.rvContacts) {
+    private var _binding: ContactsBinding? = null
+    private val binding get() = _binding!!
+
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View? {
+        super.onCreateView(inflater, container, savedInstanceState)
+        _binding = ContactsBinding.inflate(LayoutInflater.from(context))
+        return binding.root
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        _binding = null
+    }
 
     override fun onListModelCreated(listModel: ListModel) {
         with (listModel) {
@@ -27,7 +46,7 @@ class ContactsFragment : ListFragment(R.layout.contacts, R.id.rvContacts) {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        btnAdd.setOnClickListener { showDialog(this, ContactDialog()) }
+        binding.btnAdd.setOnClickListener { showDialog(this, ContactDialog()) }
     }
 
     override fun onCreateAdapter() =
@@ -55,6 +74,9 @@ class ContactModel(wallet: PyObject, val contact: PyObject) : ListItemModel(wall
 
 
 class ContactDialog : DetailDialog() {
+    private var _binding: ContactDetailBinding? = null
+    private val binding get() = _binding!!
+
     val existingContact by lazy {
         if (arguments == null) null
         else ContactModel(wallet, makeContact(arguments!!.getString("name")!!,
@@ -62,11 +84,12 @@ class ContactDialog : DetailDialog() {
     }
 
     override fun onBuildDialog(builder: AlertDialog.Builder) {
+        _binding = ContactDetailBinding.inflate(LayoutInflater.from(context))
         with (builder) {
-            setView(R.layout.contact_detail)
+            setView(binding.root)
             setNegativeButton(android.R.string.cancel, null)
             setPositiveButton(android.R.string.ok, null)
-            setNeutralButton(if (existingContact == null) R.string.qr_code
+            setNeutralButton(if (existingContact == null) R.string.scan_qr
                              else R.string.delete,
                              null)
         }
@@ -77,15 +100,15 @@ class ContactDialog : DetailDialog() {
 
         val contact = existingContact
         if (contact == null) {
-            for (btn in listOf(btnExplore, btnSend)) {
+            for (btn in listOf(binding.btnExplore, binding.btnSend)) {
                 (btn as View).visibility = View.INVISIBLE
             }
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { scanQR(this) }
         } else {
-            btnExplore.setOnClickListener {
+            binding.btnExplore.setOnClickListener {
                 exploreAddress(activity!!, contact.addr)
             }
-            btnSend.setOnClickListener {
+            binding.btnSend.setOnClickListener {
                 try {
                     showDialog(activity!!, SendDialog().apply {
                         arguments = Bundle().apply {
@@ -106,25 +129,25 @@ class ContactDialog : DetailDialog() {
     override fun onFirstShowDialog() {
         val contact = existingContact
         if (contact != null) {
-            etName.setText(contact.name)
-            etAddress.setText(contact.addrUiString)
+            binding.etName.setText(contact.name)
+            binding.etAddress.setText(contact.addrUiString)
         } else {
-            etName.requestFocus()
+            binding.etName.requestFocus()
         }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         val result = IntentIntegrator.parseActivityResult(requestCode, resultCode, data)
         if (result != null && result.contents != null) {
-            etAddress.setText(result.contents)
+            binding.etAddress.setText(result.contents)
         } else {
             super.onActivityResult(requestCode, resultCode, data)
         }
     }
 
     fun onOK() {
-        val name = etName.text.toString()
-        val address = etAddress.text.toString()
+        val name = binding.etName.text.toString()
+        val address = binding.etAddress.text.toString()
         try {
             if (name.isEmpty()) {
                 throw ToastException(R.string.name_is, Toast.LENGTH_SHORT)

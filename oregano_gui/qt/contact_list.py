@@ -44,6 +44,7 @@ from collections import defaultdict
 from typing import List, Set, Dict, Tuple
 from . import cashacctqt
 
+
 class ContactList(PrintError, MyTreeWidget):
     filter_columns = [1, 2, 3]  # Name, Label, Address
     default_sort = MyTreeWidget.SortSpec(1, Qt.AscendingOrder)
@@ -125,7 +126,7 @@ class ContactList(PrintError, MyTreeWidget):
 
     def import_contacts(self):
         wallet_folder = self.parent.get_wallet_folder()
-        filename, __ = QFileDialog.getOpenFileName(self.parent, "Select your wallet file", wallet_folder)
+        filename, __ = QFileDialog.getOpenFileName(self.parent, _("Select your contacts file"), wallet_folder)
         if not filename:
             return
         try:
@@ -237,6 +238,7 @@ class ContactList(PrintError, MyTreeWidget):
                 if typ in (ca_uri + '_W', ca_uri):
                     _contact_d = i2c(item)
                     menu.addAction(_("Details..."), lambda: cashacctqt.cash_account_detail_dialog(self.parent, _contact_d.name))
+
             menu.addSeparator()
 
         # menu.addAction(self.icon_cashacct,
@@ -306,23 +308,20 @@ class ContactList(PrintError, MyTreeWidget):
             tip = _("Your own Cash Accounts are now hidden")
         QToolTip.showText(QCursor.pos(), tip, self)
 
-    def get_full_contacts(self, include_pseudo: bool = True) -> List[Contact]:
-        ''' Returns all the contacts, with the "My CashAcct" pseudo-contacts
-        clobbering dupes of the same type that were manually added.
-        Client code should scan for type == 'cashacct' and type == 'cashacct_W' '''
-        if include_pseudo:
-            # filter out cachaccts that are "Wallet", as they will be added
-            # at the end as pseudo contacts if they also appear in real contacts
-            real_contacts = [contact for contact in
-                             self.parent.contacts.get_all(nocopy=True)
-                             if contact.type != cashacct.URI_SCHEME  # accept anything that's not cashacct
-                                or not Address.is_valid(contact.address)  # or if it is, it can have invalid address as it's clearly 'not mine"
-                                or not self.wallet.is_mine(  # or if it's not mine
-                                    Address.from_string(contact.address))
-                            ]
-            return real_contacts + self._make_wallet_cashacct_pseudo_contacts()
-        else:
+    def get_full_contacts(self, include_pseudo_types: List[str] = [cashacct.URI_SCHEME]) -> List[Contact]:
+        """ Returns all the contacts, with the "My CashAcct" pseudo-contacts clobbering dupes of the same type that
+        were manually added. Client code should scan for type == 'cashacct' and type == 'cashacct_W' """
+        if not include_pseudo_types:
             return self.parent.contacts.get_all(nocopy=True)
+        else:
+            contacts = [contact for contact in self.parent.contacts.get_all(nocopy=True)
+                        if contact.type not in ['cashacct']
+                            # or if it is, it can have invalid address as it's clearly 'not mine"
+                            or not Address.is_valid(contact.address)
+                            or not self.wallet.is_mine(Address.from_string(contact.address))]
+            if 'cashacct' in include_pseudo_types:
+                contacts = contacts + self._make_wallet_cashacct_pseudo_contacts()
+            return contacts
 
     def _make_wallet_cashacct_pseudo_contacts(self, exclude_contacts = []) -> List[Contact]:
         ''' Returns a list of 'fake' contacts that come from the wallet's
@@ -404,10 +403,14 @@ class ContactList(PrintError, MyTreeWidget):
         }
         selected_items, current_item = [], None
         edited = self._edited_item_cur_sel
-        for contact in self.get_full_contacts(include_pseudo=self.show_my_cashaccts):
+        pseudo_types = []
+        if self.show_my_cashaccts:
+            pseudo_types.append('cashacct')
+        acceptable_type_set = {ca_uri, ca_uri + '_W', ca_uri + '_T', 'address'}
+        for contact in self.get_full_contacts(include_pseudo_types=pseudo_types):
             _type, name, address = contact.type, contact.name, contact.address
             label_key = address
-            if _type in (ca_uri, ca_uri + '_W', ca_uri + '_T', 'address'):
+            if _type in acceptable_type_set:
                 try:
                     # try and re-parse and re-display the address based on current UI string settings
                     addy = Address.from_string(address)

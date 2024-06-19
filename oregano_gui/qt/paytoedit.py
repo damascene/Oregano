@@ -86,7 +86,9 @@ class PayToEdit(PrintError, ScanQRTextEdit):
         self._original_style_sheet = self.styleSheet() or ''
 
         self.previous_payto = ''
-        self.preivous_ca_could_not_verify = set()
+
+        self.previous_ca_could_not_verify = set()
+        self.is_paycode = False
 
         if sys.platform in ('darwin',):
             # See issue #1411 -- on *some* macOS systems, clearing the
@@ -104,6 +106,13 @@ class PayToEdit(PrintError, ScanQRTextEdit):
         self.setReadOnly(b)
         self.setStyleSheet(self._original_style_sheet + (frozen_style if b else normal_style))
         self.overlay_widget.setHidden(b)
+
+
+    def setIsPaycode(self, val):
+        self.is_paycode = val
+
+    def setDefault(self):
+        self.setStyleSheet(self._original_style_sheet + util.ColorScheme.DEFAULT.as_stylesheet(True))
 
     def setGreen(self):
         if sys.platform in ('darwin',) and util.ColorScheme.dark_scheme:
@@ -325,6 +334,8 @@ class PayToEdit(PrintError, ScanQRTextEdit):
         if self.is_pr:
             return
         key = str(self.toPlainText())
+        if '@' not in key:
+            return
         key = key.strip()  # strip whitespaces
         if key == self.previous_payto:
             # unchanged, restore previous state, abort early.
@@ -383,6 +394,7 @@ class PayToEdit(PrintError, ScanQRTextEdit):
     def _resolve_cash_accounts(self, skip_verif=False):
         ''' This should be called if not hasFocus(). Will run through the
         text in the payto and rewrite any verified cash accounts we find. '''
+        has_ca = False
         wallet = self.win.wallet
         lines = self.lines()
         lines_orig = lines.copy()
@@ -402,6 +414,7 @@ class PayToEdit(PrintError, ScanQRTextEdit):
             if not ca_tup:
                 # not a cashaccount
                 continue
+            has_ca = True
             # strip the '<' piece... in case user edited and stale <address> is present
             m = RX_AMT.match(line)
             if m:
@@ -417,7 +430,7 @@ class PayToEdit(PrintError, ScanQRTextEdit):
                 # user specified cash account not found.. potentially kick off verify
                 need_verif.add(ca_tup[1])
         if (need_verif and not skip_verif
-                and need_verif != self.preivous_ca_could_not_verify  # this makes it so we don't keep retrying when verif fails due to bad cashacct spec
+                and need_verif != self.previous_ca_could_not_verify  # this makes it so we don't keep retrying when verif fails due to bad cashacct spec
                 and wallet.network and wallet.network.is_connected()):
             # Note: verify_multiple_blocks here throws up a waiting dialog
             # and spawns a local event loop, so this call path may block for
@@ -436,13 +449,13 @@ class PayToEdit(PrintError, ScanQRTextEdit):
                 self._resolve_cash_accounts(skip_verif=True)
                 return # above call takes care of rewriting self, so just return early
 
-        self.preivous_ca_could_not_verify = need_verif
+        self.previous_ca_could_not_verify = need_verif
 
         if lines_orig != lines:
             # set text only if we changed something since setText kicks off more
             # parsing elsewehre in this class on textChanged
             self.setText('\n'.join(lines))
-
+        return has_ca
 
     def resolve(self, *, force_if_has_focus = False):
         ''' This is called by the main window periodically from a timer. See
@@ -471,6 +484,9 @@ class PayToEdit(PrintError, ScanQRTextEdit):
         it is since it requires the progremmer to spend considerable time
         reading this code to modfy/enhance it.  But we will work with that
         we have for now. -Calin '''
+        if not len(self.toPlainText().strip()):
+            return
+
         if self._ca_busy:
             # See the comment at the end of this function about why this flag is
             # here.
@@ -492,6 +508,7 @@ class PayToEdit(PrintError, ScanQRTextEdit):
         # multiple "Verifying, please wait... " dialogs on top of each other.
         try:
             self._ca_busy = True
-            self._resolve_cash_accounts()
+            if self._resolve_cash_accounts():
+                return
         finally:
             self._ca_busy = False

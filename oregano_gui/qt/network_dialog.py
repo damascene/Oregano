@@ -28,6 +28,7 @@
 
 import queue
 import socket
+import weakref
 from functools import partial
 
 from PyQt5.QtGui import *
@@ -40,20 +41,24 @@ from oregano.i18n import _, pgettext
 from oregano.interface import Interface
 from oregano.network import serialize_server, deserialize_server, get_eligible_servers
 from oregano.plugins import run_hook
+from oregano.simple_config import SimpleConfig
 from oregano.tor import TorController
 from oregano.util import print_error, Weak, PrintError, in_main_thread
 
 from .util import *
-from .utils import UserPortValidator
+from .utils import PortValidator, UserPortValidator, HostValidator
 
 protocol_names = ['TCP', 'SSL']
 protocol_letters = 'ts'
 
-class NetworkDialog(MessageBoxMixin, QDialog):
+
+class NetworkDialog(MessageBoxMixin, OnDestroyedMixin, QDialog):
     network_updated_signal = pyqtSignal()
 
     def __init__(self, network, config):
         QDialog.__init__(self)
+        OnDestroyedMixin.__init__(self)
+        self.weak_network = network and weakref.ref(network)
         self.setWindowTitle(_('Network'))
         self.setMinimumSize(500, 350)
         self.nlayout = NetworkChoiceLayout(self, network, config)
@@ -74,13 +79,23 @@ class NetworkDialog(MessageBoxMixin, QDialog):
         self.refresh_timer.timeout.connect(self.network_updated_signal.emit)
         self.refresh_timer.setInterval(500)
 
+    def on_destroyed(self, obj):
+        if self.is_destroyed:
+            return
+        OnDestroyedMixin.on_destroyed(self, obj)
+        network = self.weak_network and self.weak_network()
+        if network:
+            network.unregister_callback(self.on_network)
+            print_error("NetworkDialog: unregistered callback")
+
     def jumpto(self, location : str):
         self.nlayout.jumpto(location)
 
     def on_network(self, event, *args):
         ''' This may run in network thread '''
         #print_error("[NetworkDialog] on_network:",event,*args)
-        self.network_updated_signal.emit() # this enqueues call to on_update in GUI thread
+        if not self.is_destroyed:
+            self.network_updated_signal.emit()  # this enqueues call to on_update in GUI thread
 
     @rate_limited(0.333) # limit network window updates to max 3 per second. More frequent isn't that useful anyway -- and on large wallets/big synchs the network spams us with events which we would rather collapse into 1
     def on_update(self):
@@ -390,10 +405,11 @@ class ServerListWidget(QTreeWidget):
             self.setAutoScroll(val)
 
 
-class NetworkChoiceLayout(QObject, PrintError):
+class NetworkChoiceLayout(QObject, OnDestroyedMixin, PrintError):
 
     def __init__(self, parent, network, config, wizard=False):
-        super().__init__(parent)
+        QObject.__init__(self, parent)
+        OnDestroyedMixin.__init__(self)
         self.network = network
         self.config = config
         self.protocol = None
@@ -419,6 +435,7 @@ class NetworkChoiceLayout(QObject, PrintError):
                     td.stop() # stops the tor detector when proxy_tab disappears
         self.proxy_tab = proxy_tab = ProxyTab()
         self.blockchain_tab = blockchain_tab = QWidget()
+
         tabs.addTab(blockchain_tab, _('Overview'))
         tabs.addTab(server_tab, _('Server'))
         tabs.addTab(proxy_tab, _('Proxy'))
@@ -432,8 +449,10 @@ class NetworkChoiceLayout(QObject, PrintError):
 
         self.server_host = QLineEdit()
         self.server_host.setFixedWidth(200)
+        self.server_host.setValidator(HostValidator(self.server_host))
         self.server_port = QLineEdit()
         self.server_port.setFixedWidth(60)
+        self.server_port.setValidator(PortValidator(self.server_port))
         self.ssl_cb = QCheckBox(_('Use SSL'))
         self.autoconnect_cb = QCheckBox(_('Select server automatically'))
         self.autoconnect_cb.setEnabled(self.config.is_modifiable('auto_connect'))
@@ -506,8 +525,10 @@ class NetworkChoiceLayout(QObject, PrintError):
         self.proxy_mode.addItems(['SOCKS4', 'SOCKS5', 'HTTP'])
         self.proxy_host = QLineEdit()
         self.proxy_host.setFixedWidth(200)
+        self.proxy_host.setValidator(HostValidator(self.proxy_host))
         self.proxy_port = QLineEdit()
         self.proxy_port.setFixedWidth(60)
+        self.proxy_port.setValidator(PortValidator(self.proxy_port))
         self.proxy_user = QLineEdit()
         self.proxy_user.setPlaceholderText(_("Proxy user"))
         self.proxy_password = QLineEdit()
@@ -723,7 +744,7 @@ class NetworkChoiceLayout(QObject, PrintError):
 
     @in_main_thread
     def on_tor_port_changed(self, controller: TorController):
-        if not controller.active_socks_port or not controller.is_enabled() or not self.tor_use:
+        if self.is_destroyed or not controller.active_socks_port or not controller.is_enabled() or not self.tor_use:
             return
 
         # The Network class handles actually changing the port, we just
@@ -980,6 +1001,8 @@ class NetworkChoiceLayout(QObject, PrintError):
 
     @in_main_thread
     def on_tor_status_changed(self, controller):
+        if self.is_destroyed:
+            return
         if controller.status == TorController.Status.ERRORED and self.tabs.isVisible():
             tbname = self._tor_client_names[self.network.tor_controller.tor_binary_type]
             msg = _("The {tor_binary_name} client experienced an error or could not be started.").format(tor_binary_name=tbname)
@@ -1059,15 +1082,18 @@ class NetworkChoiceLayout(QObject, PrintError):
         return False
 
 
-class TorDetector(QThread):
+class TorDetector(QThread, OnDestroyedMixin):
     found_proxy = pyqtSignal(object)
 
     def __init__(self, parent, network):
-        super().__init__(parent)
+        QThread.__init__(self, parent)
+        OnDestroyedMixin.__init__(self)
         self.network = network
         self.network.tor_controller.active_port_changed.append_weak(self.on_tor_port_changed)
 
     def on_tor_port_changed(self, controller: TorController):
+        if self.is_destroyed:
+            return
         if controller.active_socks_port and self.isRunning():
             self.stopQ.put('kick')
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 #
 # Oregano - lightweight Bitcoin client
-# Copyright (C) 2019 Axel Gembe <derago@gmail.com>
+# Copyright (C) 2019 Axel Gembe <axel@gembe.net>
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation files
@@ -25,6 +25,7 @@
 
 from .aspect_layout import FixedAspectRatioLayout
 from .aspect_svg_widget import FixedAspectRatioSvgWidget
-from .image_effect import ImageGraphicsEffect
 from .color_utils import QColorLerp
-from .user_port_validator import PortValidator, UserPortValidator
+from .image_effect import ImageGraphicsEffect
+from .validators import PortValidator, UserPortValidator, HostValidator
+from . import qblockies

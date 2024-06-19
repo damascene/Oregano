@@ -42,7 +42,8 @@ from . import bitcoin
 from . import util
 from .address import Address, OpCodes, Script, ScriptError, UnknownAddress
 from .address import ScriptOutput as ScriptOutputBase
-from .transaction import BCDataStream, Transaction
+from .serialize import BCDataStream
+from .transaction import Transaction
 from . import verifier
 from . import blockchain
 from . import caches
@@ -383,15 +384,15 @@ class ScriptOutput(ScriptOutputBase):
         class MyBCDataStream(BCDataStream):
             def push_data(self, data):
                 self.input = self.input or bytearray()
-                self.input += Script.push_data(data)
+                self.input += Script.push_data(data, minimal=False)
         bcd = MyBCDataStream()
         bcd.write(cls._protocol_prefix)  # OP_RETURN -> 0x6a + 0x4 (pushdata 4 bytes) + 0x01010101 (protocol code)
         bcd.push_data(name.encode('ascii'))
         bcd.push_data(
             # type byte: 0x1 for ADDR_P2PKH, 0x2 for ADDR_P2SH
             _i2b(_addr_kind_data_types[address.kind])
-            # 20 byte haash160
-            + address.hash160
+            # 20 byte hash160
+            + address.hash
         )
 
         return cls(bytes(bcd.input))

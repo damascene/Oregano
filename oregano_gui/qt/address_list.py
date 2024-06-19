@@ -26,7 +26,7 @@
 from functools import partial
 from collections import defaultdict
 
-from .util import MyTreeWidget, MONOSPACE_FONT, SortableTreeWidgetItem, rate_limited, webopen
+from .util import MyTreeWidget, MONOSPACE_FONT, SortableTreeWidgetItem, rate_limited, webopen, ColorScheme
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QKeySequence, QCursor, QIcon
 from PyQt5.QtWidgets import QTreeWidgetItem, QAbstractItemView, QMenu, QToolTip
@@ -34,12 +34,13 @@ from oregano.i18n import _
 from oregano.address import Address
 from oregano.plugins import run_hook
 import oregano.web as web
-from oregano.util import profiler
+from oregano.util import PrintError, profiler
 from oregano import networks
 from enum import IntEnum
 from . import cashacctqt
 
-class AddressList(MyTreeWidget):
+
+class AddressList(MyTreeWidget, PrintError):
     filter_columns = [0, 1, 2]  # Address, Label, Balance
 
     _ca_minimal_chash_updated_signal = pyqtSignal(object, str)
@@ -75,6 +76,9 @@ class AddressList(MyTreeWidget):
         if not __class__._cashacct_icon:
             # lazy init the icon
             __class__._cashacct_icon = QIcon(":icons/cashacct-logo.png")  # TODO: make this an SVG
+
+    def diagnostic_name(self):
+        return f"{super().diagnostic_name()}/{self.wallet.diagnostic_name()}"
 
     def clean_up(self):
         self.cleaned_up = True
@@ -219,10 +223,10 @@ class AddressList(MyTreeWidget):
                 if ca_info:
                     # Set Cash Accounts: tool tip.. this will read the minimal_chash attribute we added to this object above
                     self._ca_set_item_tooltip(address_item, ca_info)
-                address_item.setTextAlignment(3, Qt.AlignRight)
+                address_item.setTextAlignment(3, Qt.AlignRight | Qt.AlignVCenter)
                 address_item.setFont(3, self.monospace_font)
                 if fx:
-                    address_item.setTextAlignment(4, Qt.AlignRight)
+                    address_item.setTextAlignment(4, Qt.AlignRight | Qt.AlignVCenter)
                     address_item.setFont(4, self.monospace_font)
 
                 # Set col0 address font to monospace
@@ -236,9 +240,16 @@ class AddressList(MyTreeWidget):
                     address_item.setData(0, self.DataRoles.cash_accounts, ca_list)
 
                 if self.wallet.is_frozen(address):
-                    address_item.setBackground(0, QColor('lightblue'))
+                    address_item.setBackground(0, ColorScheme.BLUE.as_color(True))
+                    address_item.setToolTip(0, _("Address is frozen, right-click to unfreeze"))
                 if self.wallet.is_beyond_limit(address, is_change):
-                    address_item.setBackground(0, QColor('red'))
+                    address_item.setBackground(0, ColorScheme.RED.as_color(True))
+                if is_change and self.wallet.is_retired_change_addr(address):
+                    address_item.setForeground(0, ColorScheme.GRAY.as_color())
+                    old_tt = address_item.toolTip(0)
+                    if old_tt:
+                        old_tt += "\n"
+                    address_item.setToolTip(0, old_tt + _("Change address is retired"))
                 if is_hidden:
                     if not has_hidden:
                         seq_item.insertChild(0, hidden_item)
@@ -265,6 +276,7 @@ class AddressList(MyTreeWidget):
             return
         from oregano.wallet import Multisig_Wallet
         is_multisig = isinstance(self.wallet, Multisig_Wallet)
+        is_hw_no_tokens = self.wallet.is_hw_without_cashtoken_support()
         can_delete = self.wallet.can_delete_address()
         selected = self.selectedItems()
         multi_select = len(selected) > 1
@@ -293,19 +305,24 @@ class AddressList(MyTreeWidget):
                 return
             addr = addrs[0]
 
-            alt_copy_text, alt_column_title = None, None
+            alt_copy_text, alt_column_title, token_text = None, None, None
             if col == 0:
                 copy_text = addr.to_full_ui_string()
                 if Address.FMT_UI == Address.FMT_LEGACY:
                     alt_copy_text, alt_column_title = addr.to_full_string(Address.FMT_CASHADDR), _('Cash Address')
                 else:
                     alt_copy_text, alt_column_title = addr.to_full_string(Address.FMT_LEGACY), _('Legacy Address')
+                token_text = addr.to_full_token_string()
+                if token_text in (copy_text, alt_copy_text):
+                    token_text = None
             else:
                 copy_text = item.text(col)
             menu.addAction(_("Copy {}").format(column_title), lambda: doCopy(copy_text))
             if alt_copy_text and alt_column_title:
                 # Add 'Copy Legacy Address' and 'Copy Cash Address' alternates if right-click is on column 0
                 menu.addAction(_("Copy {}").format(alt_column_title), lambda: doCopy(alt_copy_text))
+            if False:
+                menu.addAction(_("Copy {}").format(_("Token Address")), lambda: doCopy(token_text))
             a = menu.addAction(_('Details') + "...", lambda: self.parent.show_address(addr))
             if col == 0:
                 where_to_insert_dupe_copy_cash_account = a

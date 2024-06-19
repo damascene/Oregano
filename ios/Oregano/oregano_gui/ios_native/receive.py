@@ -33,7 +33,7 @@ pr_tooltips = {
     PR_UNPAID:'Pending',
     PR_PAID:'Paid',
     PR_EXPIRED:'Expired',
-    PR_UNCONFIRMED: 'Unconfirmed',
+    PR_UNCONFIRMED:'Unconfirmed',
 }
 
 ReqItem = namedtuple("ReqItem", "dateStr addrStr signedBy message amountStr statusStr addr iconSign iconStatus fiatStr timestamp expiration expirationStr amount fiat")

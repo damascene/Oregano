@@ -1,19 +1,18 @@
 # This image must be built in the context of the repository root.
 
-# The Android Gradle plugin still requires Java 8, so use a Debian version which includes that.
-FROM debian:stretch-20180831
+FROM debian:bookworm-20231009
 SHELL ["/bin/bash", "-c"]
 WORKDIR /root
 
 RUN apt-get update && \
-    apt-get install -y openjdk-8-jdk-headless unzip wget
+    apt-get install -y openjdk-17-jdk-headless unzip wget
 RUN echo "progress=dot:giga" > .wgetrc
 
 # Install the same minor Python version as Chaquopy uses.
 RUN apt-get update && \
     apt-get install -y gcc libbz2-dev libffi-dev liblzma-dev libsqlite3-dev libssl-dev \
                        zlib1g-dev make
-RUN version=3.8.7 && \
+RUN version=3.8.16 && \
     wget https://www.python.org/ftp/python/$version/Python-$version.tgz && \
     tar -xf Python-$version.tgz && \
     cd Python-$version && \
@@ -44,10 +43,8 @@ COPY oregano_gui oregano_gui
 COPY ios/Oregano/oregano_gui/ios_native ios/Oregano/oregano_gui/ios_native
 COPY oregano_plugins oregano_plugins
 
-# The app itself. Specifically check for the keystore, otherwise it'll build an APK with no
-# certificates.
+# The app itself.
 COPY android android
-COPY android/keystore.jks android/
 COPY contrib/deterministic-build contrib/deterministic-build
 COPY oregano oregano
 

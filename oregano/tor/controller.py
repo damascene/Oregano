@@ -1,5 +1,5 @@
 # Oregano - lightweight Bitcoin client
-# Copyright (C) 2019,2020 Axel Gembe <derago@gmail.com>
+# Copyright (C) 2019, 2020 Axel Gembe <axel@gembe.net>
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation files
@@ -37,10 +37,18 @@ import stem.process
 import stem.control
 import stem
 
-from .. import util
+from .. import util, version
 from ..util import PrintError
 from ..utils import Event
 from ..simple_config import SimpleConfig
+
+
+# Python 3.10 workaround for stem package which is using collections.Iterable (removed in 3.10)
+if sys.version_info >= (3, 10):
+    if hasattr(stem, '__version__') and version.parse_package_version(stem.__version__)[:2] <= (1, 8):
+        import collections.abc
+        # monkey-patch collections.Iterable back since stem.control expects to see this name
+        stem.control.collections.Iterable = collections.abc.Iterable
 
 
 _TOR_ENABLED_KEY = 'tor_enabled'
@@ -180,6 +188,17 @@ class TorController(PrintError):
         kwargs['start_new_session'] = True
         return TorController._orig_subprocess_popen(*args, **kwargs)
 
+    _orig_launch_tor = stem.process.launch_tor
+
+    @staticmethod
+    def _launch_tor_patch(*args, **kwargs):
+        # This sets the close_output argument to false so we can keep monitoring tor logs
+        # This will not be needed anymore when a new stem version that includes this commit is released:
+        # https://github.com/torproject/stem/commit/7a4357b2c21d0af5088c1cafce0800fc63cebbb4
+        if len(args) < 8:
+            kwargs['close_output'] = False
+        return TorController._orig_launch_tor(*args, **kwargs)
+
     @staticmethod
     def _get_tor_binary() -> Tuple[Optional[str], BinaryType]:
         # Try to locate a bundled tor binary
@@ -229,6 +248,7 @@ class TorController(PrintError):
 
         try:
             subprocess.Popen = TorController._popen_monkey_patch
+            stem.process.launch_tor = TorController._launch_tor_patch
             self._tor_process = stem.process.launch_tor_with_config(
                 tor_cmd=self.tor_binary,
                 completion_percent=0,  # We will monitor the bootstrap status

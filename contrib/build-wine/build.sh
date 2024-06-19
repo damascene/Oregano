@@ -55,7 +55,7 @@ GROUP_ID=$(id -g $USER)
 IMGNAME="oregano-wine-builder-img_${USER_ID}_${GROUP_ID}"
 
 info "Creating docker image ..."
-$SUDO docker build -t $IMGNAME \
+$SUDO docker build --progress plain -t $IMGNAME \
             --build-arg USER_ID=$USER_ID \
             --build-arg GROUP_ID=$GROUP_ID \
             --build-arg UBUNTU_MIRROR=$UBUNTU_MIRROR \
@@ -64,7 +64,7 @@ $SUDO docker build -t $IMGNAME \
 
 # This is the place where we checkout and put the exact revision we want to work
 # on. Docker will run mapping this directory to /homedir/wine/drive_c/oregano
-# which inside wine will look like c:\electroncash.
+# which inside wine will look like c:\oregano.
 FRESH_CLONE=`pwd`/contrib/build-wine/fresh_clone
 FRESH_CLONE_DIR="$FRESH_CLONE/$GIT_DIR_NAME"
 

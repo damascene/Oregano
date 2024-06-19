@@ -24,6 +24,8 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import inspect
+from typing import Optional
 from . import bitcoin
 from .bitcoin import *
 
@@ -83,6 +85,12 @@ class KeyStore(PrintError):
     def set_wallet_advice(self, addr, advice):
         pass
 
+    def is_hw_without_cashtoken_support(self):
+        """Reimplement this method to signal to the wallet that CashToken support for this keystore is dangerously
+        misleading. This returns False by default, but is re-implemented in Hardware_KeyStore to return True, because
+        all HW wallets other than Satochip (which reimplements this yet again to returns False), cannot sign
+        CashToken inputs."""
+        return False
 
 
 class Software_KeyStore(KeyStore):
@@ -104,7 +112,7 @@ class Software_KeyStore(KeyStore):
         decrypted = ec.decrypt_message(message)
         return decrypted
 
-    def sign_transaction(self, tx, password, *, use_cache=False):
+    def sign_transaction(self, tx, password, *, use_cache=False, ndata=None, grind=None):
         if self.is_watching_only():
             return
         # Raise if password is not correct.
@@ -115,7 +123,16 @@ class Software_KeyStore(KeyStore):
             keypairs[k] = self.get_private_key(v, password)
         # Sign
         if keypairs:
-            tx.sign(keypairs, use_cache=use_cache)
+            if ndata is not None:
+                # If we have ndata, check that the Transaction class passed to us supports ndata.
+                # Some extant plugins such as Flipstarter inherit from Transaction (reimplementing `sign`) and do not
+                # support this argument.
+                if 'ndata' not in inspect.signature(tx.sign, follow_wrapped=True).parameters:
+                    raise RuntimeError(f'Transaction subclass "{tx.__class__.__name__}" does not support the "ndata" kwarg')
+                tx.sign(keypairs, use_cache=use_cache, ndata=ndata)
+            else:
+                # Regular transaction sign (no ndata supported or no ndata specified)
+                tx.sign(keypairs, use_cache=use_cache)
 
 
 class Imported_KeyStore(Software_KeyStore):
@@ -214,7 +231,6 @@ class Imported_KeyStore(Software_KeyStore):
             self.keypairs[k] = c
 
 
-
 class Deterministic_KeyStore(Software_KeyStore):
 
     def __init__(self, d):
@@ -269,6 +285,11 @@ class Xpub:
         self.xpub = None
         self.xpub_receive = None
         self.xpub_change = None
+
+    def dump(self):
+        d = dict()
+        d['xpub'] = self.xpub
+        return d
 
     def get_master_public_key(self):
         return self.xpub
@@ -342,25 +363,38 @@ class Xpub:
         return derivation
 
 
-class BIP32_KeyStore(Deterministic_KeyStore, Xpub):
+class Xprv(Xpub):
 
-    def __init__(self, d):
-        Xpub.__init__(self)
-        Deterministic_KeyStore.__init__(self, d)
-        self.xpub = d.get('xpub')
-        self.xprv = d.get('xprv')
-        self.derivation = d.get('derivation')
+    xprv: Optional[str] = None
 
     def dump(self):
-        d = Deterministic_KeyStore.dump(self)
-        d['type'] = 'bip32'
-        d['xpub'] = self.xpub
-        d['xprv'] = self.xprv
-        d['derivation'] = self.derivation
+        d = super().dump()  # Adds key: "xpub" -> Optional[str]
+        d["xprv"] = self.xprv
         return d
 
-    def get_master_private_key(self, password):
+    def get_master_private_key(self, password: Optional[str]) -> Optional[str]:
+        """Returns the xprv as a string, if self.has_master_private_key(). Raises InvalidPassword if we lack
+        an xprv and password is not None.
+
+        Also raises InvalidPassword if the password param doesn't correspond to the xprv's encryption
+        (if any).
+
+        Pass password=None if you know the xprv is unencrypted or if you want to see the encrypted
+        version of it.  Passing password=None never raises, and will always return either None (if we lack
+        an xprv), or an str if we have one (in which case it may be the encrypted xprv if
+        self.is_master_private_key_encrypted() == True)"""
         return pw_decode(self.xprv, password)
+
+    def has_master_private_key(self):
+        return self.xprv is not None
+
+    def is_master_private_key_encrypted(self):
+        if self.has_master_private_key():
+            try:
+                self.check_password(None)
+            except InvalidPassword:
+                return True
+        return False
 
     def check_password(self, password):
         xprv = pw_decode(self.xprv, password)
@@ -372,6 +406,39 @@ class BIP32_KeyStore(Deterministic_KeyStore, Xpub):
         if deserialize_xprv(xprv)[4] != deserialize_xpub(self.xpub)[4]:
             raise InvalidPassword()
 
+    def add_xprv(self, xprv):
+        self.xprv = xprv
+        self.xpub = bitcoin.xpub_from_xprv(xprv)
+        self.xpub_change = self.xpub_receive = None  # Clear cached
+
+    def get_private_key(self, sequence, password):
+        xprv = self.get_master_private_key(password)
+        _, _, _, _, c, k = deserialize_xprv(xprv)
+        pk = bip32_private_key(sequence, k, c)
+        return pk, True
+
+    def update_password(self, old_password, new_password):
+        if self.xprv is not None:
+            b = pw_decode(self.xprv, old_password)
+            self.xprv = pw_encode(b, new_password)
+
+
+class BIP32_KeyStore(Deterministic_KeyStore, Xprv):
+
+    def __init__(self, d):
+        Xprv.__init__(self)
+        Deterministic_KeyStore.__init__(self, d)
+        self.xpub = d.get('xpub')
+        self.xprv = d.get('xprv')
+        self.derivation = d.get('derivation')
+
+    def dump(self):
+        d = Xprv.dump(self)  # Adds keys: "xpub" -> Optional[str], "xprv" -> Optional[str]
+        d.update(Deterministic_KeyStore.dump(self))  # Adds seed, passphrase, seed_type
+        d['type'] = 'bip32'
+        d['derivation'] = self.derivation
+        return d
+
     def update_password(self, old_password, new_password):
         self.check_password(old_password)
         if new_password == '':
@@ -382,9 +449,7 @@ class BIP32_KeyStore(Deterministic_KeyStore, Xpub):
         if self.passphrase:
             decoded = self.get_passphrase(old_password)
             self.passphrase = pw_encode(decoded, new_password)
-        if self.xprv is not None:
-            b = pw_decode(self.xprv, old_password)
-            self.xprv = pw_encode(b, new_password)
+        Xprv.update_password(self, old_password, new_password)
 
     def has_derivation(self) -> bool:
         """ Note: the derivation path may not always be saved. Older versions
@@ -392,11 +457,7 @@ class BIP32_KeyStore(Deterministic_KeyStore, Xpub):
         return bool(self.derivation)
 
     def is_watching_only(self):
-        return self.xprv is None
-
-    def add_xprv(self, xprv):
-        self.xprv = xprv
-        self.xpub = bitcoin.xpub_from_xprv(xprv)
+        return not self.has_master_private_key()
 
     def add_xprv_from_seed(self, bip32_seed, xtype, derivation):
         xprv, xpub = bip32_root(bip32_seed, xtype)
@@ -404,13 +465,7 @@ class BIP32_KeyStore(Deterministic_KeyStore, Xpub):
         self.add_xprv(xprv)
         self.derivation = derivation
 
-    def get_private_key(self, sequence, password):
-        xprv = self.get_master_private_key(password)
-        _, _, _, _, c, k = deserialize_xprv(xprv)
-        pk = bip32_private_key(sequence, k, c)
-        return pk, True
-
-    def set_wallet_advice(self, addr, advice): #overrides KeyStore.set_wallet_advice
+    def set_wallet_advice(self, addr, advice):  # overrides KeyStore.set_wallet_advice
         self.wallet_advice[addr] = advice
 
 
@@ -553,7 +608,6 @@ class Old_KeyStore(Deterministic_KeyStore):
             self.seed = pw_encode(decoded, new_password)
 
 
-
 class Hardware_KeyStore(KeyStore, Xpub):
     # Derived classes must set:
     #   - device
@@ -623,6 +677,12 @@ class Hardware_KeyStore(KeyStore, Xpub):
         transactions to sign a transactions'''
         return True
 
+    def is_hw_without_cashtoken_support(self):
+        """Default a HW wallet to warning about CashTokens being dangerous to send to wallet, until proven otherwise.
+        The only HW wallet currently supporting CashTokens is Satochip (which reimplements this function to
+        return False)."""
+        return True
+
 
 # extended pubkeys
 
@@ -670,7 +730,6 @@ def hardware_keystore(d):
     raise BaseException('unknown hardware type', hw_type)
 
 def load_keystore(storage, name):
-    w = storage.get('wallet_type', 'standard')
     d = storage.get(name, {})
     t = d.get('type')
     if not t:
@@ -811,3 +870,15 @@ def from_master_key(text):
     else:
         raise BaseException('Invalid key')
     return k
+
+def from_master_keys(multiline_text: str):
+    ret = []
+    for line in multiline_text.split():
+        line = line.strip()
+        if line:
+            try:
+                k = from_master_key(line)
+            except:
+                continue
+            ret.append(k)
+    return ret

@@ -9,3 +9,5 @@
 /keystore.jks
 /release
 .externalNativeBuild
+/.settings/*
+/app/.settings/*

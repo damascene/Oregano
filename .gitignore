@@ -24,6 +24,7 @@ contrib/osx/*.dylib
 # tox files
 .cache/
 .coverage
+.coverage-regtest
 htmlcov
 
 # MacOSX

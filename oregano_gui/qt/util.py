@@ -5,10 +5,12 @@ import platform
 import queue
 import threading
 import os
+import weakref
 import webbrowser
 from collections import namedtuple
 from functools import partial, wraps
 from locale import atof
+from typing import Optional
 
 from oregano.address import Address
 from oregano.util import print_error, PrintError, Weak, finalization_print_error
@@ -473,7 +475,7 @@ def text_dialog(parent, title, label, ok_label, default=None, allow_multi=False)
         return txt.toPlainText()
 
 class ChoicesLayout(object):
-    def __init__(self, msg, choices, on_clicked=None, checked_index=0):
+    def __init__(self, msg, choices, on_clicked=None, on_id_clicked=None, checked_index=0):
         vbox = QVBoxLayout()
         if len(msg) > 50:
             vbox.addWidget(WWLabel(msg))
@@ -496,14 +498,20 @@ class ChoicesLayout(object):
 
         if on_clicked:
             group.buttonClicked.connect(partial(on_clicked, self))
+        if on_id_clicked:
+            group.idClicked.connect(partial(on_id_clicked, self))
 
         self.vbox = vbox
+        self.gb = gb2
 
     def layout(self):
         return self.vbox
 
     def selected_index(self):
         return self.group.checkedId()
+
+    def group_box(self):
+        return self.gb
 
 def address_combo(addresses):
     addr_combo = QComboBox()
@@ -523,9 +531,12 @@ def filename_field(config, defaultname, select_msg):
     gb.setLayout(vbox)
     b1 = QRadioButton()
     b1.setText(_("CSV"))
-    b1.setChecked(True)
     b2 = QRadioButton()
     b2.setText(_("JSON"))
+    if defaultname.endswith(".json"):
+        b2.setChecked(True)
+    else:
+        b1.setChecked(True)
     vbox.addWidget(b1)
     vbox.addWidget(b2)
 
@@ -930,6 +941,7 @@ class ButtonsTextEdit(OverlayControlMixin, QPlainTextEdit):
         self.setText = self.setPlainText
         self.text = self.toPlainText
 
+
 class TaskThread(PrintError, QThread):
     '''Thread that runs background tasks.  Callbacks are guaranteed
     to happen in the context of its parent.'''
@@ -1296,10 +1308,16 @@ def rate_limited(rate, *, classlevel=False, ts_after=False):
         return wrapper
     return wrapper0
 
+
+debug_destroyed = False  # Set this to True to debug QObject "destroyed" signals using destroyed_print_error
+
+
 def destroyed_print_error(qobject, msg=None):
-    ''' Supply a message to be printed via print_error when obj is
-    destroyed (Qt C++ deleted). This is useful for debugging memory leaks. '''
+    """ Supply a message to be printed via print_error when obj is destroyed (Qt C++ deleted).
+    This is useful for debugging memory leaks. Note that this function is a no-op unless debug_destroyed is True."""
     assert isinstance(qobject, QObject), "destroyed_print_error can only be used on QObject instances!"
+    if not debug_destroyed:
+        return
     if msg is None:
         # Generate a useful message if none is supplied.
         if isinstance(qobject, PrintError):
@@ -1317,8 +1335,13 @@ def destroyed_print_error(qobject, msg=None):
                 except:
                     pass  # some of the code in this project overrites .parent or it may not have a parent
                 name += qobject.__class__.__qualname__
-        msg = "[{}] destroyed".format(name)
-    qobject.destroyed.connect(lambda x=None,msg=msg: print_error(msg))
+        msg = f"[{name}] destroyed"
+
+    def on_destroyed(obj_ignored):
+        print_error(msg)
+
+    qobject.destroyed.connect(on_destroyed)
+
 
 def webopen(url: str):
     if (sys.platform == 'linux' and os.environ.get('APPIMAGE')
@@ -1332,6 +1355,7 @@ def webopen(url: str):
             os._exit(0)  # Python docs advise doing this after forking to prevent atexit handlers from executing.
     else:
         webbrowser.open(url)
+
 
 class TextBrowserKeyboardFocusFilter(QTextBrowser):
     """
@@ -1354,6 +1378,29 @@ class TextBrowserKeyboardFocusFilter(QTextBrowser):
     def keyPressEvent(self, e: QKeyEvent):
         self.setTextInteractionFlags(self.textInteractionFlags() | Qt.TextSelectableByKeyboard)
         super().keyPressEvent(e)
+
+
+class OnDestroyedMixin:
+    """A mixin class designed to be used with any QObject. It will call the on_destroyed method (which can be
+    overridden), and it offers the property is_destroyed.  Used in network_dialog.py. """
+    def __init__(self):
+        assert isinstance(self, QObject)
+        self.is_destroyed = False
+        weak_self = weakref.ref(self)
+
+        def handler(obj):
+            strong_self = weak_self()
+            if strong_self:
+                strong_self.on_destroyed(obj)
+
+        self.destroyed.connect(lambda obj: handler(obj))
+
+    def on_destroyed(self, obj):
+        if self.is_destroyed:
+            return
+        self.is_destroyed = True
+        print_error(f"OnDestroyedMixin, object destroyed: {self!r}")
+
 
 if __name__ == "__main__":
     app = QApplication([])

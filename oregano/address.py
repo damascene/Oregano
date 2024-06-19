@@ -1,5 +1,5 @@
 # Oregano - lightweight Bitcoin client
-# Copyright (C) 2017 The Oregano Developers
+# Copyright (C) 2017-2023 The Oregano Developers
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation files
@@ -23,13 +23,13 @@
 
 # Many of the functions in this file are copied from ElectrumX
 
-from collections import namedtuple
 import hashlib
 import struct
+from collections import namedtuple
+from typing import Union
 
 from . import cashaddr, networks
-from enum import IntEnum
-from .bitcoin import EC_KEY, is_minikey, minikey_to_private_key, SCRIPT_TYPES
+from .bitcoin import EC_KEY, is_minikey, minikey_to_private_key, SCRIPT_TYPES, OpCodes, push_script_bytes, ripemd160
 from .util import cachedproperty, inv_dict
 
 _sha256 = hashlib.sha256
@@ -38,154 +38,11 @@ hex_to_bytes = bytes.fromhex
 
 
 class AddressError(Exception):
-    '''Exception used for Address errors.'''
+    """Exception used for Address errors."""
+
 
 class ScriptError(Exception):
-    '''Exception used for Script errors.'''
-
-
-# Derived from Bitcoin-ABC script.h
-class OpCodes(IntEnum):
-    # push value
-    OP_0 = 0x00
-    OP_FALSE = OP_0
-    OP_PUSHDATA1 = 0x4c
-    OP_PUSHDATA2 = 0x4d
-    OP_PUSHDATA4 = 0x4e
-    OP_1NEGATE = 0x4f
-    OP_RESERVED = 0x50
-    OP_1 = 0x51
-    OP_TRUE = OP_1
-    OP_2 = 0x52
-    OP_3 = 0x53
-    OP_4 = 0x54
-    OP_5 = 0x55
-    OP_6 = 0x56
-    OP_7 = 0x57
-    OP_8 = 0x58
-    OP_9 = 0x59
-    OP_10 = 0x5a
-    OP_11 = 0x5b
-    OP_12 = 0x5c
-    OP_13 = 0x5d
-    OP_14 = 0x5e
-    OP_15 = 0x5f
-    OP_16 = 0x60
-
-    # control
-    OP_NOP = 0x61
-    OP_VER = 0x62
-    OP_IF = 0x63
-    OP_NOTIF = 0x64
-    OP_VERIF = 0x65
-    OP_VERNOTIF = 0x66
-    OP_ELSE = 0x67
-    OP_ENDIF = 0x68
-    OP_VERIFY = 0x69
-    OP_RETURN = 0x6a
-
-    # stack ops
-    OP_TOALTSTACK = 0x6b
-    OP_FROMALTSTACK = 0x6c
-    OP_2DROP = 0x6d
-    OP_2DUP = 0x6e
-    OP_3DUP = 0x6f
-    OP_2OVER = 0x70
-    OP_2ROT = 0x71
-    OP_2SWAP = 0x72
-    OP_IFDUP = 0x73
-    OP_DEPTH = 0x74
-    OP_DROP = 0x75
-    OP_DUP = 0x76
-    OP_NIP = 0x77
-    OP_OVER = 0x78
-    OP_PICK = 0x79
-    OP_ROLL = 0x7a
-    OP_ROT = 0x7b
-    OP_SWAP = 0x7c
-    OP_TUCK = 0x7d
-
-    # splice ops
-    OP_CAT = 0x7e
-    OP_SPLIT = 0x7f   # after monolith upgrade (May 2018)
-    OP_NUM2BIN = 0x80 # after monolith upgrade (May 2018)
-    OP_BIN2NUM = 0x81 # after monolith upgrade (May 2018)
-    OP_SIZE = 0x82
-
-    # bit logic
-    OP_INVERT = 0x83
-    OP_AND = 0x84
-    OP_OR = 0x85
-    OP_XOR = 0x86
-    OP_EQUAL = 0x87
-    OP_EQUALVERIFY = 0x88
-    OP_RESERVED1 = 0x89
-    OP_RESERVED2 = 0x8a
-
-    # numeric
-    OP_1ADD = 0x8b
-    OP_1SUB = 0x8c
-    OP_2MUL = 0x8d
-    OP_2DIV = 0x8e
-    OP_NEGATE = 0x8f
-    OP_ABS = 0x90
-    OP_NOT = 0x91
-    OP_0NOTEQUAL = 0x92
-
-    OP_ADD = 0x93
-    OP_SUB = 0x94
-    OP_MUL = 0x95
-    OP_DIV = 0x96
-    OP_MOD = 0x97
-    OP_LSHIFT = 0x98
-    OP_RSHIFT = 0x99
-
-    OP_BOOLAND = 0x9a
-    OP_BOOLOR = 0x9b
-    OP_NUMEQUAL = 0x9c
-    OP_NUMEQUALVERIFY = 0x9d
-    OP_NUMNOTEQUAL = 0x9e
-    OP_LESSTHAN = 0x9f
-    OP_GREATERTHAN = 0xa0
-    OP_LESSTHANOREQUAL = 0xa1
-    OP_GREATERTHANOREQUAL = 0xa2
-    OP_MIN = 0xa3
-    OP_MAX = 0xa4
-
-    OP_WITHIN = 0xa5
-
-    # crypto
-    OP_RIPEMD160 = 0xa6
-    OP_SHA1 = 0xa7
-    OP_SHA256 = 0xa8
-    OP_HASH160 = 0xa9
-    OP_HASH256 = 0xaa
-    OP_CODESEPARATOR = 0xab
-    OP_CHECKSIG = 0xac
-    OP_CHECKSIGVERIFY = 0xad
-    OP_CHECKMULTISIG = 0xae
-    OP_CHECKMULTISIGVERIFY = 0xaf
-
-    # expansion
-    OP_NOP1 = 0xb0
-    OP_CHECKLOCKTIMEVERIFY = 0xb1
-    OP_NOP2 = OP_CHECKLOCKTIMEVERIFY
-    OP_CHECKSEQUENCEVERIFY = 0xb2
-    OP_NOP3 = OP_CHECKSEQUENCEVERIFY
-    OP_NOP4 = 0xb3
-    OP_NOP5 = 0xb4
-    OP_NOP6 = 0xb5
-    OP_NOP7 = 0xb6
-    OP_NOP8 = 0xb7
-    OP_NOP9 = 0xb8
-    OP_NOP10 = 0xb9
-
-    # More crypto
-    OP_CHECKDATASIG = 0xba
-    OP_CHECKDATASIGVERIFY = 0xbb
-
-    # additional byte string operations
-    OP_REVERSEBYTES = 0xbc
+    """Exception used for Script errors."""
 
 
 P2PKH_prefix = bytes([OpCodes.OP_DUP, OpCodes.OP_HASH160, 20])
@@ -194,61 +51,67 @@ P2PKH_suffix = bytes([OpCodes.OP_EQUALVERIFY, OpCodes.OP_CHECKSIG])
 P2SH_prefix = bytes([OpCodes.OP_HASH160, 20])
 P2SH_suffix = bytes([OpCodes.OP_EQUAL])
 
+P2SH32_prefix = bytes([OpCodes.OP_HASH256, 32])
+P2SH32_suffix = P2SH_suffix
+
+
 # Utility functions
 
 def to_bytes(x):
-    '''Convert to bytes which is hashable.'''
+    """Convert to bytes which is hashable."""
     if isinstance(x, bytes):
         return x
     if isinstance(x, bytearray):
         return bytes(x)
     raise TypeError('{} is not bytes ({})'.format(x, type(x)))
 
+
 def hash_to_hex_str(x):
-    '''Convert a big-endian binary hash to displayed hex string.
+    """Convert a big-endian binary hash to displayed hex string.
 
     Display form of a binary hash is reversed and converted to hex.
-    '''
+    """
     return bytes(reversed(x)).hex()
 
+
 def hex_str_to_hash(x):
-    '''Convert a displayed hex string to a binary hash.'''
+    """Convert a displayed hex string to a binary hash."""
     return bytes(reversed(hex_to_bytes(x)))
 
+
 def bytes_to_int(be_bytes):
-    '''Interprets a big-endian sequence of bytes as an integer'''
+    """Interprets a big-endian sequence of bytes as an integer"""
     return int.from_bytes(be_bytes, 'big')
 
+
 def int_to_bytes(value):
-    '''Converts an integer to a big-endian sequence of bytes'''
+    """Converts an integer to a big-endian sequence of bytes"""
     return value.to_bytes((value.bit_length() + 7) // 8, 'big')
 
+
 def sha256(x):
-    '''Simple wrapper of hashlib sha256.'''
+    """Simple wrapper of hashlib sha256."""
     return _sha256(x).digest()
 
+
 def double_sha256(x):
-    '''SHA-256 of SHA-256, as used extensively in bitcoin.'''
+    """SHA-256 of SHA-256, as used extensively in bitcoin."""
     return sha256(sha256(x))
 
-def ripemd160(x):
-    '''Simple wrapper of hashlib ripemd160.'''
-    h = _new_hash('ripemd160')
-    h.update(x)
-    return h.digest()
 
 def hash160(x):
-    '''RIPEMD-160 of SHA-256.
+    """RIPEMD-160 of SHA-256.
 
-    Used to make bitcoin addresses from pubkeys.'''
+    Used to make bitcoin addresses from pubkeys."""
     return ripemd160(sha256(x))
+
 
 class UnknownAddress(namedtuple("UnknownAddress", "meta")):
 
     def __new__(cls, meta=None):
         return super(UnknownAddress, cls).__new__(cls, meta)
 
-    def to_ui_string(self):
+    def to_ui_string(self, *, net=None):
         if self.meta is not None:
             meta = self.meta
             meta = (isinstance(meta, (bytes, bytearray)) and meta.hex()) or meta
@@ -272,7 +135,7 @@ class PublicKey(namedtuple("PublicKeyTuple", "pubkey")):
 
     @classmethod
     def from_pubkey(cls, pubkey):
-        '''Create from a public key expressed as binary bytes.'''
+        """Create from a public key expressed as binary bytes."""
         if isinstance(pubkey, str):
             pubkey = hex_to_bytes(pubkey)
         cls.validate(pubkey)
@@ -280,10 +143,10 @@ class PublicKey(namedtuple("PublicKeyTuple", "pubkey")):
 
     @classmethod
     def privkey_from_WIF_privkey(cls, WIF_privkey, *, net=None):
-        '''Given a WIF private key (or minikey), return the private key as
+        """Given a WIF private key (or minikey), return the private key as
         binary and a boolean indicating whether it was encoded to
         indicate a compressed public key or not.
-        '''
+        """
         if net is None: net = networks.net
         if is_minikey(WIF_privkey):
             # The Casascius coins were uncompressed
@@ -292,7 +155,8 @@ class PublicKey(namedtuple("PublicKeyTuple", "pubkey")):
         if not raw:
             raise ValueError('Private key WIF decode error; unable to decode.')
         if raw[0] != net.WIF_PREFIX:
-            # try and generate a helpful error message as this propagates up to the UI if they are creating a new wallet.
+            # try and generate a helpful error message as this propagates up to the UI if they are creating a new
+            # wallet.
             extra = inv_dict(SCRIPT_TYPES).get(int(raw[0]-net.WIF_PREFIX), '')
             if extra:
                 extra = "; this corresponds to a key of type: '{}' which is unsupported for importing from WIF key.".format(extra)
@@ -305,15 +169,14 @@ class PublicKey(namedtuple("PublicKeyTuple", "pubkey")):
 
     @classmethod
     def from_WIF_privkey(cls, WIF_privkey):
-        '''Create a compressed or uncompressed public key from a private
-        key.'''
+        """Create a compressed or uncompressed public key from a private key."""
         privkey, compressed = cls.privkey_from_WIF_privkey(WIF_privkey)
         ec_key = EC_KEY(privkey)
         return cls.from_pubkey(ec_key.GetPubKey(compressed))
 
     @classmethod
     def from_string(cls, string):
-        '''Create from a hex string.'''
+        """Create from a hex string."""
         return cls.from_pubkey(hex_to_bytes(string))
 
     @classmethod
@@ -329,39 +192,39 @@ class PublicKey(namedtuple("PublicKeyTuple", "pubkey")):
 
     @cachedproperty
     def address(self):
-        '''Convert to an Address object.'''
+        """Convert to an Address object."""
         return Address(hash160(self.pubkey), Address.ADDR_P2PKH)
 
     def is_compressed(self):
-        '''Returns True if the pubkey is compressed.'''
+        """Returns True if the pubkey is compressed."""
         return len(self.pubkey) == 33
 
-    def to_ui_string(self):
-        '''Convert to a hexadecimal string.'''
+    def to_ui_string(self, *, net=None):
+        """Convert to a hexadecimal string."""
         return self.pubkey.hex()
 
     def to_storage_string(self):
-        '''Convert to a hexadecimal string for storage.'''
+        """Convert to a hexadecimal string for storage."""
         return self.pubkey.hex()
 
     def to_script(self):
-        '''Note this returns the P2PK script.'''
+        """Note this returns the P2PK script."""
         return Script.P2PK_script(self.pubkey)
 
     def to_script_hex(self):
-        '''Return a script to pay to the address as a hex string.'''
+        """Return a script to pay to the address as a hex string."""
         return self.to_script().hex()
 
     def to_scripthash(self):
-        '''Returns the hash of the script in binary.'''
+        """Returns the hash of the script in binary."""
         return sha256(self.to_script())
 
     def to_scripthash_hex(self):
-        '''Like other bitcoin hashes this is reversed when written in hex.'''
+        """Like other bitcoin hashes this is reversed when written in hex."""
         return hash_to_hex_str(self.to_scripthash())
 
     def to_P2PKH_script(self):
-        '''Return a P2PKH script.'''
+        """Return a P2PKH script."""
         return self.address.to_script()
 
     def __str__(self):
@@ -375,7 +238,7 @@ class ScriptOutput(namedtuple("ScriptAddressTuple", "script")):
 
     @classmethod
     def from_string(self, string):
-        '''Instantiate from a mixture of opcodes and raw data.'''
+        """Instantiate from a mixture of opcodes and raw data."""
         script = bytearray()
         for word in string.split():
             if word.startswith('OP_'):
@@ -389,10 +252,10 @@ class ScriptOutput(namedtuple("ScriptAddressTuple", "script")):
                 script.extend(Script.push_data(binascii.unhexlify(word)))
         return ScriptOutput.protocol_factory(bytes(script))
 
-    def to_ui_string(self,ignored=None):
-        '''Convert to user-readable OP-codes (plus pushdata as text if possible)
+    def to_ui_string(self, ignored=None, *, net=None):
+        """Convert to user-readable OP-codes (plus pushdata as text if possible)
         eg OP_RETURN (12) "Hello there!"
-        '''
+        """
         try:
             ops = Script.get_ops(self.script)
         except ScriptError:
@@ -422,7 +285,7 @@ class ScriptOutput(namedtuple("ScriptAddressTuple", "script")):
                     friendlystring = data.hex()
 
                 parts.append(lookup(op) + " " + friendlystring)
-            else: # isinstance(op, int):
+            else:  # isinstance(op, int):
                 parts.append(lookup(op))
         return ', '.join(parts)
 
@@ -430,9 +293,17 @@ class ScriptOutput(namedtuple("ScriptAddressTuple", "script")):
         return self.script
 
     def is_opreturn(self):
-        ''' Returns True iff this script is an OP_RETURN script (starts with
-        the OP_RETURN byte)'''
+        """ Returns True iff this script is an OP_RETURN script (starts with
+        the OP_RETURN byte) """
         return bool(self.script and self.script[0] == OpCodes.OP_RETURN)
+
+    def to_scripthash(self):
+        """Returns the hash of the script in binary."""
+        return sha256(self.to_script())
+
+    def to_scripthash_hex(self):
+        """Like other bitcoin hashes this is reversed when written in hex."""
+        return hash_to_hex_str(self.to_scripthash())
 
     def __str__(self):
         return self.to_ui_string(True)
@@ -455,17 +326,17 @@ class ScriptOutput(namedtuple("ScriptAddressTuple", "script")):
     protocol_classes = set()
 
     def make_complete(self, block_height=None, block_hash=None, txid=None):
-        ''' Subclasses implement this, noop here. '''
+        """ Subclasses implement this, noop here. """
         pass
 
     def is_complete(self):
-        ''' Subclasses implement this, noop here. '''
+        """ Subclasses implement this, noop here. """
         return True
 
     @classmethod
     def find_protocol_class(cls, script_bytes):
-        ''' Scans the protocol_classes set, and if the passed-in script matches
-        a known protocol, returns that class, otherwise returns our class. '''
+        """ Scans the protocol_classes set, and if the passed-in script matches
+        a known protocol, returns that class, otherwise returns our class. """
         for c in cls.protocol_classes:
             if c.protocol_match(script_bytes):
                 return c
@@ -473,89 +344,122 @@ class ScriptOutput(namedtuple("ScriptAddressTuple", "script")):
 
     @staticmethod
     def protocol_factory(script):
-        ''' One shot -- find the right class and construct object based on script '''
+        """ One shot -- find the right class and construct object based on script """
         return __class__.find_protocol_class(script)(script)
 
 
-# A namedtuple for easy comparison and unique hashing
-class Address(namedtuple("AddressTuple", "hash160 kind")):
+class Address(namedtuple("AddressTuple", "hash kind")):
+    """A namedtuple for easy comparison and unique hashing.
+    Note that member .hash may be 20 or 32 bytes (it may be either a hash160 or a hash256 for P2SH32)."""
 
     # Address kinds
-    ADDR_P2PKH = 0
-    ADDR_P2SH = 1
+    ADDR_P2PKH = cashaddr.PUBKEY_TYPE  # 0 (cashaddr.TOKEN_PUBKEY_TYPE also gets flattened down to this one here)
+    ADDR_P2SH = cashaddr.SCRIPT_TYPE   # 1 (cashaddr.TOKEN_SCRIPT_TYPE also gets flattened down to this one here)
 
     # Address formats
     FMT_CASHADDR = 0
     FMT_LEGACY = 1
-    FMT_BITPAY = 2   # Supported temporarily only for compatibility
+    FMT_TOKEN = 2
 
     _NUM_FMTS = 3  # <-- Be sure to update this if you add a format above!
 
     # Default to CashAddr
     FMT_UI = FMT_CASHADDR
 
-    def __new__(cls, hash160, kind):
-        assert kind in (cls.ADDR_P2PKH, cls.ADDR_P2SH)
-        hash160 = to_bytes(hash160)
-        assert len(hash160) == 20, "hash must be 20 bytes"
-        ret = super().__new__(cls, hash160, kind)
+    def __new__(cls, addr_hash, kind):
+        addr_hash = to_bytes(addr_hash)
+        ret = super().__new__(cls, addr_hash, kind)
         ret._addr2str_cache = [None] * cls._NUM_FMTS
+        ret._check_sanity()
         return ret
+
+    def _check_sanity(self):
+        assert self.kind in (self.ADDR_P2PKH, self.ADDR_P2SH), f"Unknown kind: {self.kind}"
+        hlen = len(self.hash)
+        assert hlen in (20, 32), f"Only 20-byte or 32-byte hashes are accepted, got hash of length: {hlen}"
+        if self.kind == self.ADDR_P2PKH:
+            assert hlen == 20, "P2PKH may only have hash length 20"
+
+    @property
+    def hash160(self):
+        """The member .hash used to be called .hash160. This property method is here so as to continue to support
+        old call-sites expecting addr.hash160 to continue to exist, so that plugins and other dependent code doesn't
+        break.  Note that despite the name, the hash returned may be 32-bytes in the case of P2SH32."""
+        return self.hash
 
     @classmethod
     def show_cashaddr(cls, on):
         cls.FMT_UI = cls.FMT_CASHADDR if on else cls.FMT_LEGACY
 
     @classmethod
-    def from_cashaddr_string(cls, string, *, net=None):
-        '''Construct from a cashaddress string.'''
+    def from_cashaddr_string(cls, string, *, net=None, return_ca_type=False):
+        """Construct from a cashaddress string. If return_ca_type=True then it will return a tuple of
+        (Address, cashaddress_type), otherwise it will just return the Address object. """
         if net is None: net = networks.net
         prefix = net.CASHADDR_PREFIX
         if string.upper() == string:
             prefix = prefix.upper()
         if not string.startswith(prefix + ':'):
             string = ':'.join([prefix, string])
-        addr_prefix, kind, addr_hash = cashaddr.decode(string)
+        try:
+            addr_prefix, ca_type, addr_hash = cashaddr.decode(string)
+        except ValueError as e:
+            raise AddressError(str(e))
         if addr_prefix != prefix:
-            raise AddressError('address has unexpected prefix {}'
-                               .format(addr_prefix))
-        if kind == cashaddr.PUBKEY_TYPE:
-            return cls(addr_hash, cls.ADDR_P2PKH)
-        elif kind == cashaddr.SCRIPT_TYPE:
-            return cls(addr_hash, cls.ADDR_P2SH)
+            raise AddressError('address has unexpected prefix {}'.format(addr_prefix))
+        if ca_type in (cashaddr.PUBKEY_TYPE, cashaddr.TOKEN_PUBKEY_TYPE):
+            # Since this class encapsulates a locking script, irrespective of display format, we flatten down
+            # the token vs non-token encoding types to 1 here.
+            kind = cls.ADDR_P2PKH
+        elif ca_type in (cashaddr.SCRIPT_TYPE, cashaddr.TOKEN_SCRIPT_TYPE):
+            # Since this class encapsulates a locking script, irrespective of display format, we flatten down
+            # the token vs non-token encoding types to 1 here.
+            kind = cls.ADDR_P2SH
         else:
-            raise AddressError('address has unexpected kind {}'.format(kind))
+            raise AddressError('address has unexpected cashaddr type {}'.format(ca_type))
+        if kind == cls.ADDR_P2PKH and len(addr_hash) != 20:
+            raise AddressError('address has wrong hash length, P2PKH may only have a 20-byte hash')
+        try:
+            ret = cls(addr_hash, kind)
+        except AssertionError as e:
+            raise AddressError(str(e))
+        if return_ca_type:
+            return ret, ca_type
+        return ret
 
     @classmethod
     def from_string(cls, string, *, net=None):
-        '''Construct from an address string.'''
+        """Construct from an address string."""
         if net is None: net = networks.net
-        if len(string) > 35:
-            try:
-                return cls.from_cashaddr_string(string, net=net)
-            except ValueError as e:
-                raise AddressError(str(e))
 
+        # First, try cashaddr decode
+        try:
+            return cls.from_cashaddr_string(string, net=net)
+        except AddressError as e:
+            cashaddr_exc = AddressError(f'invalid address: {string} (' + str(e) + ')')
+
+        # Proceed down to try legacy as a fallback
         try:
             raw = Base58.decode_check(string)
         except Base58Error as e:
-            raise AddressError(str(e))
+            raise cashaddr_exc or AddressError(str(e))
 
-        # Require version byte(s) plus hash160.
-        if len(raw) != 21:
+        # Require version byte(s) plus hash
+        if len(raw) not in (21, 33):
             raise AddressError('invalid address: {}'.format(string))
 
-        verbyte, hash160 = raw[0], raw[1:]
-        if verbyte in [net.ADDRTYPE_P2PKH,
-                       net.ADDRTYPE_P2PKH_BITPAY]:
+        verbyte, addr_hash = raw[0], raw[1:]
+        if verbyte == net.ADDRTYPE_P2PKH:
             kind = cls.ADDR_P2PKH
-        elif verbyte in [net.ADDRTYPE_P2SH,
-                         net.ADDRTYPE_P2SH_BITPAY]:
+        elif verbyte == net.ADDRTYPE_P2SH:
             kind = cls.ADDR_P2SH
         else:
-            raise AddressError('unknown version byte: {}'.format(verbyte))
+            raise AddressError(f'invalid address: {string} (unknown version byte: {verbyte})')
 
-        return cls(hash160, kind)
+        try:
+            return cls(addr_hash, kind)
+        except AssertionError as e:
+            raise AddressError(f'invalid address: {string} (' + str(e) + ')')
 
     @classmethod
     def is_valid(cls, string, *, net=None):
@@ -568,14 +472,13 @@ class Address(namedtuple("AddressTuple", "hash160 kind")):
 
     @classmethod
     def from_strings(cls, strings, *, net=None):
-        '''Construct a list from an iterable of strings.'''
+        """Construct a list from an iterable of strings."""
         if net is None: net = networks.net
         return [cls.from_string(string, net=net) for string in strings]
 
     @classmethod
     def from_pubkey(cls, pubkey):
-        '''Returns a P2PKH address from a public key.  The public key can
-        be bytes or a hex string.'''
+        """Returns a P2PKH address from a public key.  The public key can be bytes or a hex string."""
         if isinstance(pubkey, str):
             pubkey = hex_to_bytes(pubkey)
         PublicKey.validate(pubkey)
@@ -583,21 +486,24 @@ class Address(namedtuple("AddressTuple", "hash160 kind")):
 
     @classmethod
     def from_P2PKH_hash(cls, hash160):
-        '''Construct from a P2PKH hash160.'''
+        """Construct from a P2PKH hash160."""
+        assert len(hash160) == 20
         return cls(hash160, cls.ADDR_P2PKH)
 
     @classmethod
-    def from_P2SH_hash(cls, hash160):
-        '''Construct from a P2PKH hash160.'''
-        return cls(hash160, cls.ADDR_P2SH)
+    def from_P2SH_hash(cls, hash160_or_hash256):
+        """Construct from a P2SH hash160 or hash256 (for P2SH32)."""
+        assert len(hash160_or_hash256) in (20, 32)
+        return cls(hash160_or_hash256, cls.ADDR_P2SH)
 
     @classmethod
     def from_multisig_script(cls, script):
+        """Construct a P2SH address (20-byte hash) given a multi-sig script."""
         return cls(hash160(script), cls.ADDR_P2SH)
 
     @classmethod
     def to_strings(cls, fmt, addrs, *, net=None):
-        '''Construct a list of strings from an iterable of Address objects.'''
+        """Construct a list of strings from an iterable of Address objects."""
         if net is None: net = networks.net
         return [addr.to_string(fmt, net=net) for addr in addrs]
 
@@ -611,110 +517,136 @@ class Address(namedtuple("AddressTuple", "hash160 kind")):
         except Base58Error:
             return False
 
-        if len(raw) != 21:
+        if len(raw) not in (21, 33):
             return False
 
         verbyte = raw[0]
         legacy_formats = (
             net.ADDRTYPE_P2PKH,
-            net.ADDRTYPE_P2PKH_BITPAY,
-            net.ADDRTYPE_P2SH,
-            net.ADDRTYPE_P2SH_BITPAY,
+            net.ADDRTYPE_P2SH
         )
-        return verbyte in legacy_formats
+        if verbyte not in legacy_formats:
+            return False
+        if verbyte == net.ADDRTYPE_P2PKH and len(raw) != 21:
+            # p2pkh only supports 20-byte hashes
+            return False
+        return True
 
-    def to_cashaddr(self, *, net=None):
+    @classmethod
+    def is_token(cls, address_string: str, *, net=None) -> bool:
+        """Returns True if the supplied string parses correctly as a token-aware cash address
+        (cash address type 2 or type 3), False otherwise."""
+        try:
+            _, ca_type = cls.from_cashaddr_string(address_string, net=net, return_ca_type=True)
+            return ca_type in (cashaddr.TOKEN_PUBKEY_TYPE, cashaddr.TOKEN_SCRIPT_TYPE)
+        except (ValueError, AddressError):
+            pass
+        return False
+
+    def to_cashaddr(self, *, net=None, ca_type_override=None):
         if net is None: net = networks.net
-        if self.kind == self.ADDR_P2PKH:
-            kind  = cashaddr.PUBKEY_TYPE
-        else:
-            kind  = cashaddr.SCRIPT_TYPE
-        return cashaddr.encode(net.CASHADDR_PREFIX, kind, self.hash160)
+        self._check_sanity()
+        ca_type = ca_type_override if ca_type_override is not None else self.kind
+        return cashaddr.encode(net.CASHADDR_PREFIX, ca_type, self.hash)
 
     def to_string(self, fmt, *, net=None):
-        '''Converts to a string of the given format.'''
+        """Converts to a string of the given format."""
         if net is None: net = networks.net
-        if net is networks.net:
+        cacheable = net is networks.net
+        cached = None
+        if cacheable:
             try:
                 cached = self._addr2str_cache[fmt]
                 if cached:
                     return cached
             except (IndexError, TypeError):
-                raise AddressError('unrecognised format')
+                raise AddressError('unrecognized format')
 
         try:
-            cached = None
-            if fmt == self.FMT_CASHADDR:
-                cached = self.to_cashaddr(net=net)
+            if fmt in (self.FMT_CASHADDR, self.FMT_TOKEN):
+                ca_type = self.kind
+                if fmt == self.FMT_TOKEN:
+                    if self.kind == self.ADDR_P2PKH:
+                        ca_type = cashaddr.TOKEN_PUBKEY_TYPE
+                    elif self.kind == self.ADDR_P2SH:
+                        ca_type = cashaddr.TOKEN_SCRIPT_TYPE
+                cached = self.to_cashaddr(net=net, ca_type_override=ca_type)
                 return cached
 
             if fmt == self.FMT_LEGACY:
                 if self.kind == self.ADDR_P2PKH:
                     verbyte = net.ADDRTYPE_P2PKH
-                else:
+                else:  # self.kind == self.ADDR_P2SH
                     verbyte = net.ADDRTYPE_P2SH
-            elif fmt == self.FMT_BITPAY:
-                if self.kind == self.ADDR_P2PKH:
-                    verbyte = net.ADDRTYPE_P2PKH_BITPAY
-                else:
-                    verbyte = net.ADDRTYPE_P2SH_BITPAY
             else:
-                # This should never be reached due to cache-lookup check above. But leaving it in as it's a harmless sanity check.
-                raise AddressError('unrecognised format')
+                # This should never be reached due to cache-lookup check above.
+                # But leaving it in as it's a harmless sanity check.
+                raise AddressError('unrecognized format')
 
-            cached = Base58.encode_check(bytes([verbyte]) + self.hash160)
+            self._check_sanity()
+            cached = Base58.encode_check(bytes([verbyte]) + self.hash)
             return cached
         finally:
-            if cached and net is networks.net:
+            if cached and cacheable:
                 self._addr2str_cache[fmt] = cached
 
+    def to_token_string(self, *, net=None):
+        """Return a (prefix-less) string that is the "token-aware" representation of this address. These addresses
+        are encoded with cashaddr type 2 or 3 (as opposed to 0 or 1 for non-token-aware addresses)."""
+        return self.to_string(self.FMT_TOKEN, net=net)
+
     def to_full_string(self, fmt, *, net=None):
-        '''Convert to text, with a URI prefix for cashaddr format.'''
+        """Convert to text, with a URI prefix for cashaddr format."""
         if net is None: net = networks.net
         text = self.to_string(fmt, net=net)
-        if fmt == self.FMT_CASHADDR:
+        if fmt in (self.FMT_CASHADDR, self.FMT_TOKEN):
             text = ':'.join([net.CASHADDR_PREFIX, text])
         return text
 
+    def to_full_token_string(self, *, net=None):
+        """Like to_token_string but always includes the prefix (e.g. "bitcoincash:").."""
+        return self.to_full_string(self.FMT_TOKEN, net=net)
+
     def to_ui_string(self, *, net=None):
-        '''Convert to text in the current UI format choice.'''
+        """Convert to text in the current UI format choice."""
         if net is None: net = networks.net
         return self.to_string(self.FMT_UI, net=net)
 
     def to_full_ui_string(self, *, net=None):
-        '''Convert to text, with a URI prefix if cashaddr.'''
+        """Convert to text, with a URI prefix if cashaddr."""
         if net is None: net = networks.net
         return self.to_full_string(self.FMT_UI, net=net)
 
     def to_URI_components(self, *, net=None):
-        '''Returns a (scheme, path) pair for building a URI.'''
+        """Returns a (scheme, path) pair for building a URI."""
         if net is None: net = networks.net
         scheme = net.CASHADDR_PREFIX
         path = self.to_ui_string(net=net)
         return scheme, path
 
     def to_storage_string(self, *, net=None):
-        '''Convert to text in the storage format.'''
+        """Convert to text in the storage format."""
         if net is None: net = networks.net
         return self.to_string(self.FMT_LEGACY, net=net)
 
     def to_script(self):
-        '''Return a binary script to pay to the address.'''
+        """Return a binary script to pay to the address."""
+        self._check_sanity()
         if self.kind == self.ADDR_P2PKH:
-            return Script.P2PKH_script(self.hash160)
+            return Script.P2PKH_script(self.hash)
         else:
-            return Script.P2SH_script(self.hash160)
+            return Script.P2SH_script(self.hash)
 
     def to_script_hex(self):
-        '''Return a script to pay to the address as a hex string.'''
+        """Return a script to pay to the address as a hex string."""
         return self.to_script().hex()
 
     def to_scripthash(self):
-        '''Returns the hash of the script in binary.'''
+        """Returns the hash of the script in binary."""
         return sha256(self.to_script())
 
     def to_scripthash_hex(self):
-        '''Like other bitcoin hashes this is reversed when written in hex.'''
+        """Like other bitcoin hashes this is reversed when written in hex."""
         return hash_to_hex_str(self.to_scripthash())
 
     def __str__(self):
@@ -740,9 +672,12 @@ def _match_ops(ops, pattern):
 class Script:
 
     @classmethod
-    def P2SH_script(cls, hash160):
-        assert len(hash160) == 20
-        return P2SH_prefix + hash160 + P2SH_suffix
+    def P2SH_script(cls, addr_hash):
+        assert len(addr_hash) in (20, 32)
+        if len(addr_hash) == 20:
+            return P2SH_prefix + addr_hash + P2SH_suffix
+        else:
+            return P2SH32_prefix + addr_hash + P2SH32_suffix
 
     @classmethod
     def P2PKH_script(cls, hash160):
@@ -755,7 +690,7 @@ class Script:
 
     @classmethod
     def multisig_script(cls, m, pubkeys):
-        '''Returns the script for a pay-to-multisig transaction.'''
+        """Returns the script for a pay-to-multisig transaction."""
         n = len(pubkeys)
         if not 1 <= m <= n <= 15:
             raise ScriptError('{:d} of {:d} multisig script not possible'
@@ -764,26 +699,17 @@ class Script:
             PublicKey.validate(pubkey)   # Can be compressed or not
         # See https://bitcoin.org/en/developer-guide
         # 2 of 3 is: OP_2 pubkey1 pubkey2 pubkey3 OP_3 OP_CHECKMULTISIG
-        return (bytes([OpCodes.OP_1 + m - 1])
+        return (cls.push_data(bytes([m]))
                 + b''.join(cls.push_data(pubkey) for pubkey in pubkeys)
-                + bytes([OpCodes.OP_1 + n - 1, OpCodes.OP_CHECKMULTISIG]))
+                + cls.push_data(bytes([n])) + bytes([OpCodes.OP_CHECKMULTISIG]))
 
     @classmethod
-    def push_data(cls, data):
-        '''Returns the OpCodes to push the data on the stack.'''
-        assert isinstance(data, (bytes, bytearray))
-
-        n = len(data)
-        if n < OpCodes.OP_PUSHDATA1:
-            return bytes([n]) + data
-        if n < 256:
-            return bytes([OpCodes.OP_PUSHDATA1, n]) + data
-        if n < 65536:
-            return bytes([OpCodes.OP_PUSHDATA2]) + struct.pack('<H', n) + data
-        return bytes([OpCodes.OP_PUSHDATA4]) + struct.pack('<I', n) + data
+    def push_data(cls, data: Union[bytes, bytearray], *, minimal=True) -> bytes:
+        """Returns the OpCodes to push the data on the stack, plus the payload."""
+        return push_script_bytes(data, minimal=minimal)
 
     @classmethod
-    def get_ops(cls, script):
+    def get_ops(cls, script, *, synthesize_minimal_data=True):
         ops = []
 
         # The unpacks or script[n] below throw on truncated scripts
@@ -805,7 +731,7 @@ class Script:
                         # Two-byte length, then data
                         dlen, = struct.unpack('<H', script[n: n + 2])
                         n += 2
-                    else: # op == OpCodes.OP_PUSHDATA4
+                    else:  # op == OpCodes.OP_PUSHDATA4
                         # Four-byte length, then data
                         dlen, = struct.unpack('<I', script[n: n + 4])
                         n += 4
@@ -813,6 +739,14 @@ class Script:
                         raise IndexError
                     data = script[n:n + dlen]
                     n += dlen
+                elif synthesize_minimal_data and OpCodes.OP_1 <= op <= OpCodes.OP_16:
+                    # BIP62: 1-byte pushes containing just 0x1 to 0x10 are encoded as single op-codes
+                    # We synthesize the data that was originally pushed.
+                    data = bytes([1 + (op - OpCodes.OP_1)])
+                elif synthesize_minimal_data and op == OpCodes.OP_1NEGATE:
+                    # BIP62: 1-byte pushes containing just 0x81 are encoded as single op-codes
+                    # We synthesize the data that was originally pushed.
+                    data = bytes([0x81])
                 else:
                     data = None
 
@@ -826,11 +760,11 @@ class Script:
 
 
 class Base58Error(Exception):
-    '''Exception used for Base58 errors.'''
+    """Exception used for Base58 errors."""
 
 
 class Base58:
-    '''Class providing base 58 functionality.'''
+    """Class providing base 58 functionality."""
 
     chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
     assert len(chars) == 58
@@ -888,8 +822,8 @@ class Base58:
 
     @staticmethod
     def decode_check(txt):
-        '''Decodes a Base58Check-encoded string to a payload.  The version
-        prefixes it.'''
+        """Decodes a Base58Check-encoded string to a payload.  The version
+        prefixes it."""
         be_bytes = Base58.decode(txt)
         result, check = be_bytes[:-4], be_bytes[-4:]
         if check != double_sha256(result)[:4]:

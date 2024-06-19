@@ -64,6 +64,20 @@ class AddressDialog(PrintError, WindowModalDialog):
         self.addr_e.addCopyButton()
         self.addr_e.setReadOnly(True)
         vbox.addWidget(self.addr_e)
+
+        tooltip = _('This is the token-aware version of this address.')
+        lbl = QLabel(_("Token Address:"))
+        lbl.setToolTip(tooltip)
+        self.tok_addr_e = ButtonsLineEdit()
+        icon = ":icons/qrcode_white.svg" if ColorScheme.dark_scheme else ":icons/qrcode.svg"
+        self.tok_addr_e.addButton(icon, self.show_token_addr_qr, _("Show QR Code"))
+        self.tok_addr_e.addCopyButton()
+        self.tok_addr_e.setReadOnly(True)
+        self.tok_addr_e.setToolTip(tooltip)
+        if False:
+            vbox.addWidget(lbl)
+            vbox.addWidget(self.tok_addr_e)
+
         self.update_addr()
 
         try:
@@ -124,7 +138,7 @@ class AddressDialog(PrintError, WindowModalDialog):
             self.update_cash_accounts()
 
     def connect_signals(self):
-        # connect slots so the embedded history list gets updated whenever the history changes
+        """Connect slots so the embedded history list gets updated whenever the history changes."""
         self.parent.gui_object.cashaddr_toggled_signal.connect(self.update_addr)
         self.parent.history_updated_signal.connect(self.hw.update)
         self.parent.labels_updated_signal.connect(self.hw.update_labels)
@@ -151,6 +165,7 @@ class AddressDialog(PrintError, WindowModalDialog):
 
     def update_addr(self):
         self.addr_e.setText(self.address.to_full_ui_string())
+        self.tok_addr_e.setText(self.address.to_full_token_string())
 
     def update_cash_accounts(self, ca_infos=None):
         gb = self.cashacct_gb
@@ -176,18 +191,26 @@ class AddressDialog(PrintError, WindowModalDialog):
     def get_domain(self):
         return [self.address]
 
-    def show_qr(self):
-        text = self.address.to_full_ui_string()
+    def _show_qr(self, is_token):
+        text = self.address.to_full_ui_string() if not is_token else self.address.to_full_token_string()
         try:
-            self.parent.show_qrcode(text, 'Address', parent=self)
+            title = _("Address") if not is_token else _("Token Address")
+            self.parent.show_qrcode(text, title, parent=self)
         except Exception as e:
             self.show_message(str(e))
 
+    def show_qr(self):
+        self._show_qr(False)
+
+    def show_token_addr_qr(self):
+        self._show_qr(True)
+
     def exec_(self):
-        ''' Overrides super class and does some cleanup after exec '''
+        """ Overrides super class and does some cleanup after exec """
         self.connect_signals()
         retval = super().exec_()
         self.disconnect_signals()
+        # run GC in 10 ms. Otherwise this window sticks around in memory for way too long
         import gc
-        QTimer.singleShot(10, lambda: gc.collect()) # run GC in 10 ms. Otherwise this window sticks around in memory for way too long
+        QTimer.singleShot(10, lambda: gc.collect())
         return retval

@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function
 
+import ast
 from code import InteractiveConsole
 import os
 from os.path import dirname, exists, join, split
@@ -7,15 +8,21 @@ import pkgutil
 from shutil import copyfile
 from time import time
 
-from oregano import commands, daemon, interface, keystore, storage, tests, util
+from oregano import commands, daemon, interface, keystore, storage, util
 from oregano.i18n import _
 from oregano.storage import WalletStorage
 from oregano.wallet import (ImportedAddressWallet, ImportedPrivkeyWallet, Standard_Wallet,
-                                 Wallet)
+                                 Wallet, Multisig_Wallet)
+from oregano.plugins import Plugins, run_hook
 
 
 CALLBACKS = ["banner", "blockchain_updated", "fee", "interfaces", "new_transaction",
              "on_history", "on_quotes", "servers", "status", "verified2", "wallet_updated"]
+
+
+class AndroidWindow:
+    def __init__(self):
+        self.wallet = None
 
 
 class AndroidConsole(InteractiveConsole):
@@ -80,9 +87,11 @@ class AndroidCommands(commands.Commands):
 
         # Create daemon here rather than in start() so the DaemonModel has a chance to register
         # its callback before the daemon threads start.
-        self.daemon = daemon.Daemon(self.config, fd, is_gui=False, plugins=None)
+        plugins = Plugins(config, "android")
+        self.daemon = daemon.Daemon(self.config, fd, is_gui=False, plugins=plugins)
         self.daemon_running = False
 
+        self.window = AndroidWindow()  # For android callbacks TODO: change it's place maybe
         self.gui_callback = None
         self.network = self.daemon.network
         self.network.register_callback(self._on_callback, CALLBACKS)
@@ -128,6 +137,9 @@ class AndroidCommands(commands.Commands):
             wallet = Wallet(storage)
             wallet.start_threads(self.network)
             self.daemon.add_wallet(wallet)
+            self.window.wallet = wallet
+            self.window.wallet_password = password
+            run_hook('on_new_window', self.window)
 
     def close_wallet(self, name=None):
         """Close a wallet"""
@@ -135,7 +147,7 @@ class AndroidCommands(commands.Commands):
         self.daemon.stop_wallet(self._wallet_path(name))
 
     def create(self, name, password, seed=None, passphrase="", bip39_derivation=None,
-               master=None, addresses=None, privkeys=None):
+               master=None, addresses=None, privkeys=None, multisig=False):
         """Create or restore a new wallet"""
         path = self._wallet_path(name)
         if exists(path):
@@ -158,9 +170,31 @@ class AndroidCommands(commands.Commands):
                     print("Your wallet generation seed is:\n\"%s\"" % seed)
                 ks = keystore.from_seed(seed, passphrase)
 
-            storage.put('keystore', ks.dump())
-            wallet = Standard_Wallet(storage)
+            if not multisig:
+                storage.put('keystore', ks.dump())
+                wallet = Standard_Wallet(storage)
+            else:
+                # For multisig wallets, we do not immediately create a wallet storage file.
+                # Instead, we just get the keystore; create_multisig() handles wallet storage
+                # later, once all cosigners are added.
+                return ks.dump()
 
+        wallet.update_password(None, password, encrypt=True)
+
+    def create_multisig(self, name, password, keystores=None, cosigners=None, signatures=None):
+        """Create or restore a new wallet"""
+        path = self._wallet_path(name)
+        if exists(path):
+            raise FileExistsError(path)
+        storage = WalletStorage(path)
+
+        # Multisig wallet type
+        storage.put("wallet_type", "%dof%d" % (signatures, cosigners))
+        for i, k in enumerate(keystores, start=1):
+            storage.put('x%d/' % i, ast.literal_eval(k))
+        storage.write()
+
+        wallet = Multisig_Wallet(storage)
         wallet.update_password(None, password, encrypt=True)
 
     # END commands from the argparse interface.

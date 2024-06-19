@@ -9,6 +9,9 @@ DISTDIR="$PROJECT_ROOT/dist"
 export GCC_STRIP_BINARIES="1"
 export GIT_SUBMODULE_FLAGS="--recommend-shallow --depth 1"
 
+# Fix for some docker envs failing with git errors
+git config --global --add safe.directory $(readlink -f "$PROJECT_ROOT")  # /opt/oregano
+
 . "$CONTRIB"/base.sh
 
 rm -fvr "$DISTDIR"

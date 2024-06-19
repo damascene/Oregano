@@ -31,6 +31,8 @@ Compatibility checking.
 # Please avoid introducing local imports here, as in future it would be
 # nice if plugins could check compatibility in the plugins enable/disable menu
 # (i.e. in the __init__.py)
+import os
+
 from oregano import schnorr
 from google.protobuf.message import Message
 
@@ -39,8 +41,9 @@ def check():
     # curve ops, so that CPU usage can be quite high and can cause rounds to
     # fail due to slowed responses. This applies on both on server and client
     # side.
-    if not schnorr.has_fast_sign() or not schnorr.has_fast_verify():
-        raise RuntimeError("Fusion requires libsecp256k1")
+    if 'ANDROID_DATA' not in os.environ:
+        if not schnorr.has_fast_sign() or not schnorr.has_fast_verify():
+            raise RuntimeError("Fusion requires libsecp256k1")
 
     # Old versions of protobuf < 3.7.0 have missing API that we need in
     # validation.proto_strict_parse.

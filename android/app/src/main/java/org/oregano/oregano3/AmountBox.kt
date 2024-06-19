@@ -1,41 +1,43 @@
 package org.oregano.oregano3
 
 import android.app.Dialog
+import android.content.Context
 import android.text.Editable
+import android.view.LayoutInflater
 import android.view.View
 import android.widget.EditText
-import kotlinx.android.synthetic.main.amount_box.*
+import android.widget.TextView
+import org.oregano.oregano3.databinding.AmountBoxBinding
 
-
-class AmountBox(val dialog: Dialog) {
+class AmountBox(val binding: AmountBoxBinding) {
     private val fiatEnabled = fiatEnabled()
     private var updating = false  // Prevent infinite recursion.
     var listener: (() -> Unit)? = null
 
     init {
-        dialog.tvUnit.text = unitName
+        binding.tvUnit.text = unitName
         if (fiatEnabled) {
-            dialog.tvFiatUnit.text = formatFiatUnit()
+            binding.tvFiatUnit.text = formatFiatUnit()
         } else {
-            dialog.tvFiatUnit.visibility = View.GONE
-            dialog.etFiat.visibility = View.GONE
+            binding.tvFiatUnit.visibility = View.GONE
+            binding.etFiat.visibility = View.GONE
         }
 
-        for (et in listOf(dialog.etAmount, dialog.etFiat)) {
+        for (et in listOf(binding.etAmount, binding.etFiat)) {
             et.addAfterTextChangedListener { s: Editable ->
                 if (!updating) {
                     if (fiatEnabled) {
                         val etOther: EditText
                         val formatOther: () -> String
                         when (et) {
-                            dialog.etAmount -> {
-                                etOther = dialog.etFiat
+                            binding.etAmount -> {
+                                etOther = binding.etFiat
                                 formatOther = {
-                                    formatFiatAmount(toSatoshis(s.toString())) ?: ""
+                                    formatFiatAmount(toSatoshis(s.toString()), commas=false) ?: ""
                                 }
                             }
-                            dialog.etFiat -> {
-                                etOther = dialog.etAmount
+                            binding.etFiat -> {
+                                etOther = binding.etAmount
                                 formatOther = {
                                     val amount = fiatToSatoshis(s.toString())
                                     if (amount != null) formatSatoshis(amount) else ""
@@ -63,7 +65,7 @@ class AmountBox(val dialog: Dialog) {
     var amount: Long?
         get() {
             val amount = try {
-                toSatoshis(dialog.etAmount.text.toString())
+                toSatoshis(binding.etAmount.text.toString())
             } catch (e: ToastException) {
                 return null
             }
@@ -72,22 +74,22 @@ class AmountBox(val dialog: Dialog) {
         }
         set(amount) {
             if (amount == null) {
-                dialog.etAmount.setText("")
+                binding.etAmount.setText("")
             } else {
-                dialog.etAmount.setText(formatSatoshis(amount))
-                dialog.etAmount.setSelection(dialog.etAmount.text.length)
+                binding.etAmount.setText(formatSatoshis(amount))
+                binding.etAmount.setSelection(binding.etAmount.text.length)
             }
         }
 
     var isEditable: Boolean
-        get() = isEditable(dialog.etAmount)
+        get() = isEditable(binding.etAmount)
         set(editable) {
-            for (et in listOf(dialog.etAmount, dialog.etFiat)) {
+            for (et in listOf(binding.etAmount, binding.etFiat)) {
                 setEditable(et, editable)
             }
         }
 
     /** We don't <requestFocus/> in the layout file, because in the Send dialog, initial focus
      * is normally on the address box. */
-    fun requestFocus() = dialog.etAmount.requestFocus()
+    fun requestFocus() = binding.etAmount.requestFocus()
 }

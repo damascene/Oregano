@@ -33,7 +33,8 @@ import json
 import ecdsa
 import pyaes
 
-from typing import Tuple
+from enum import IntEnum
+from typing import Tuple, Union
 
 from . import networks
 from .util import (bfh, bh2u, to_string, print_error, InvalidPassword,
@@ -75,6 +76,183 @@ try:
     from Cryptodome.Cipher import AES
 except:
     AES = None
+
+
+# Derived from Bitcoin Cash Node src/script/script.h
+class OpCodes(IntEnum):
+    # push value
+    OP_0 = 0x00
+    OP_FALSE = OP_0
+    OP_PUSHDATA1 = 0x4c
+    OP_PUSHDATA2 = 0x4d
+    OP_PUSHDATA4 = 0x4e
+    OP_1NEGATE = 0x4f
+    OP_RESERVED = 0x50
+    OP_1 = 0x51
+    OP_TRUE = OP_1
+    OP_2 = 0x52
+    OP_3 = 0x53
+    OP_4 = 0x54
+    OP_5 = 0x55
+    OP_6 = 0x56
+    OP_7 = 0x57
+    OP_8 = 0x58
+    OP_9 = 0x59
+    OP_10 = 0x5a
+    OP_11 = 0x5b
+    OP_12 = 0x5c
+    OP_13 = 0x5d
+    OP_14 = 0x5e
+    OP_15 = 0x5f
+    OP_16 = 0x60
+
+    # control
+    OP_NOP = 0x61
+    OP_VER = 0x62
+    OP_IF = 0x63
+    OP_NOTIF = 0x64
+    OP_VERIF = 0x65
+    OP_VERNOTIF = 0x66
+    OP_ELSE = 0x67
+    OP_ENDIF = 0x68
+    OP_VERIFY = 0x69
+    OP_RETURN = 0x6a
+
+    # stack ops
+    OP_TOALTSTACK = 0x6b
+    OP_FROMALTSTACK = 0x6c
+    OP_2DROP = 0x6d
+    OP_2DUP = 0x6e
+    OP_3DUP = 0x6f
+    OP_2OVER = 0x70
+    OP_2ROT = 0x71
+    OP_2SWAP = 0x72
+    OP_IFDUP = 0x73
+    OP_DEPTH = 0x74
+    OP_DROP = 0x75
+    OP_DUP = 0x76
+    OP_NIP = 0x77
+    OP_OVER = 0x78
+    OP_PICK = 0x79
+    OP_ROLL = 0x7a
+    OP_ROT = 0x7b
+    OP_SWAP = 0x7c
+    OP_TUCK = 0x7d
+
+    # splice ops
+    OP_CAT = 0x7e
+    OP_SPLIT = 0x7f   # after monolith upgrade (May 2018)
+    OP_NUM2BIN = 0x80 # after monolith upgrade (May 2018)
+    OP_BIN2NUM = 0x81 # after monolith upgrade (May 2018)
+    OP_SIZE = 0x82
+
+    # bit logic
+    OP_INVERT = 0x83
+    OP_AND = 0x84
+    OP_OR = 0x85
+    OP_XOR = 0x86
+    OP_EQUAL = 0x87
+    OP_EQUALVERIFY = 0x88
+    OP_RESERVED1 = 0x89
+    OP_RESERVED2 = 0x8a
+
+    # numeric
+    OP_1ADD = 0x8b
+    OP_1SUB = 0x8c
+    OP_2MUL = 0x8d
+    OP_2DIV = 0x8e
+    OP_NEGATE = 0x8f
+    OP_ABS = 0x90
+    OP_NOT = 0x91
+    OP_0NOTEQUAL = 0x92
+
+    OP_ADD = 0x93
+    OP_SUB = 0x94
+    OP_MUL = 0x95
+    OP_DIV = 0x96
+    OP_MOD = 0x97
+    OP_LSHIFT = 0x98
+    OP_RSHIFT = 0x99
+
+    OP_BOOLAND = 0x9a
+    OP_BOOLOR = 0x9b
+    OP_NUMEQUAL = 0x9c
+    OP_NUMEQUALVERIFY = 0x9d
+    OP_NUMNOTEQUAL = 0x9e
+    OP_LESSTHAN = 0x9f
+    OP_GREATERTHAN = 0xa0
+    OP_LESSTHANOREQUAL = 0xa1
+    OP_GREATERTHANOREQUAL = 0xa2
+    OP_MIN = 0xa3
+    OP_MAX = 0xa4
+
+    OP_WITHIN = 0xa5
+
+    # crypto
+    OP_RIPEMD160 = 0xa6
+    OP_SHA1 = 0xa7
+    OP_SHA256 = 0xa8
+    OP_HASH160 = 0xa9
+    OP_HASH256 = 0xaa
+    OP_CODESEPARATOR = 0xab
+    OP_CHECKSIG = 0xac
+    OP_CHECKSIGVERIFY = 0xad
+    OP_CHECKMULTISIG = 0xae
+    OP_CHECKMULTISIGVERIFY = 0xaf
+
+    # expansion
+    OP_NOP1 = 0xb0
+    OP_CHECKLOCKTIMEVERIFY = 0xb1
+    OP_NOP2 = OP_CHECKLOCKTIMEVERIFY
+    OP_CHECKSEQUENCEVERIFY = 0xb2
+    OP_NOP3 = OP_CHECKSEQUENCEVERIFY
+    OP_NOP4 = 0xb3
+    OP_NOP5 = 0xb4
+    OP_NOP6 = 0xb5
+    OP_NOP7 = 0xb6
+    OP_NOP8 = 0xb7
+    OP_NOP9 = 0xb8
+    OP_NOP10 = 0xb9
+
+    # More crypto
+    OP_CHECKDATASIG = 0xba
+    OP_CHECKDATASIGVERIFY = 0xbb
+
+    # additional byte string operations
+    OP_REVERSEBYTES = 0xbc
+
+    # Available opcodes: 0xbd, 0xbe, 0xbf
+
+    # Native Introspection opcodes
+    OP_INPUTINDEX = 0xc0
+    OP_ACTIVEBYTECODE = 0xc1
+    OP_TXVERSION = 0xc2
+    OP_TXINPUTCOUNT = 0xc3
+    OP_TXOUTPUTCOUNT = 0xc4
+    OP_TXLOCKTIME = 0xc5
+    OP_UTXOVALUE = 0xc6
+    OP_UTXOBYTECODE = 0xc7
+    OP_OUTPOINTTXHASH = 0xc8
+    OP_OUTPOINTINDEX = 0xc9
+    OP_INPUTBYTECODE = 0xca
+    OP_INPUTSEQUENCENUMBER = 0xcb
+    OP_OUTPUTVALUE = 0xcc
+    OP_OUTPUTBYTECODE = 0xcd
+
+    # Native Introspection of tokens(SCRIPT_ENABLE_TOKENS must be set, e.g. Upgrade9 activated)
+    OP_UTXOTOKENCATEGORY = 0xce
+    OP_UTXOTOKENCOMMITMENT = 0xcf
+    OP_UTXOTOKENAMOUNT = 0xd0
+    OP_OUTPUTTOKENCATEGORY = 0xd1
+    OP_OUTPUTTOKENCOMMITMENT = 0xd2
+    OP_OUTPUTTOKENAMOUNT = 0xd3
+
+    OP_RESERVED3 = 0xd4
+    OP_RESERVED4 = 0xd5
+
+    SPECIAL_TOKEN_PREFIX = 0xef  # Not a real op-code, reserved for token prefix
+
+    FIRST_INVALID_OPCODE = 0xf0
 
 
 class InvalidPadding(Exception):
@@ -126,8 +304,8 @@ def aes_decrypt_with_iv(key, iv, data):
         data = aes.feed(data) + aes.feed()  # empty aes.feed() flushes buffer
     try:
         return strip_PKCS7_padding(data)
-    except InvalidPadding:
-        raise InvalidPassword()
+    except InvalidPadding as e:
+        raise InvalidPassword() from e
 
 
 def EncodeAES_bytes(secret, msg):
@@ -163,13 +341,14 @@ def pw_encode(s, password):
     else:
         return s
 
+
 def pw_decode(s, password):
     if password is not None:
         secret = Hash(password)
         try:
             d = to_string(DecodeAES_base64(secret, s), "utf8")
-        except Exception:
-            raise InvalidPassword()
+        except Exception as e:
+            raise InvalidPassword() from e
         return d
     else:
         return s
@@ -179,37 +358,75 @@ def rev_hex(s):
     return bh2u(bfh(s)[::-1])
 
 
-def int_to_hex(i, length=1):
+def int_to_bytes(i: int, length: int = 1) -> bytes:
     assert isinstance(i, int)
-    s = hex(i)[2:].rstrip('L')
-    s = "0"*(2*length - len(s)) + s
-    return rev_hex(s)
+    return i.to_bytes(length=length, byteorder='little')
 
 
-def var_int(i):
+def int_to_hex(i: int, length: int = 1) -> str:
+    return int_to_bytes(i, length).hex()
+
+
+def var_int_bytes(i: int) -> bytes:
     # https://en.bitcoin.it/wiki/Protocol_specification#Variable_length_integer
-    if i<0xfd:
-        return int_to_hex(i)
-    elif i<=0xffff:
-        return "fd"+int_to_hex(i,2)
-    elif i<=0xffffffff:
-        return "fe"+int_to_hex(i,4)
+    if i < 0xfd:
+        return int_to_bytes(i)
+    elif i <= 0xffff:
+        return b"\xfd" + int_to_bytes(i, 2)
+    elif i <= 0xffffffff:
+        return b"\xfe" + int_to_bytes(i, 4)
     else:
-        return "ff"+int_to_hex(i,8)
+        return b"\xff" + int_to_bytes(i, 8)
 
 
-def op_push(i):
-    if i<0x4c:
-        return int_to_hex(i)
-    elif i<0xff:
-        return '4c' + int_to_hex(i)
-    elif i<0xffff:
-        return '4d' + int_to_hex(i,2)
+def var_int(i: int) -> str:
+    return var_int_bytes(i).hex()
+
+
+def op_push_bytes(data_len: int) -> bytes:
+    assert isinstance(data_len, int) and data_len >= 0
+    if data_len < OpCodes.OP_PUSHDATA1:
+        return data_len.to_bytes(byteorder='little', length=1)
+    elif data_len <= 0xff:
+        return bytes([OpCodes.OP_PUSHDATA1]) + data_len.to_bytes(byteorder='little', length=1)
+    elif data_len <= 0xffff:
+        return bytes([OpCodes.OP_PUSHDATA2]) + data_len.to_bytes(byteorder='little', length=2)
     else:
-        return '4e' + int_to_hex(i,4)
+        return bytes([OpCodes.OP_PUSHDATA4]) + data_len.to_bytes(byteorder='little', length=4)
 
-def push_script(x):
-    return op_push(len(x)//2) + x
+
+def op_push(i: int) -> str:
+    """Hex version of above"""
+    return op_push_bytes(i).hex()
+
+
+def push_script_bytes(data: Union[bytearray, bytes], *, minimal=True) -> bytes:
+    """Returns pushed data to the script, automatically respecting BIP62 "minimal encoding" rules.
+    If `minimal` is False, will not use BIP62 and will just push using OP_PUSHDATA*, etc (this
+    non-BIP62 way of pushing is the convention in OP_RETURN scripts such as CashAccounts usually).
+    Input data is bytes, returns bytes."""
+    assert isinstance(data, (bytes, bytearray))
+    data_len = len(data)
+
+    if minimal:
+        # BIP62 has bizarre rules for minimal pushes of length 0 or 1
+        # See: https://en.bitcoin.it/wiki/BIP_0062#Push_operators
+        # And also: https://gitlab.com/bitcoin-cash-node/bitcoin-cash-node/-/blob/master/src/script/script.cpp#L300
+        if data_len == 0 or data_len == 1 and data[0] == 0:
+            return bytes([OpCodes.OP_0])
+        elif data_len == 1 and 1 <= data[0] <= 16:
+            return bytes([OpCodes.OP_1 + (data[0] - 1)])
+        elif data_len == 1 and data[0] == 0x81:
+            return bytes([OpCodes.OP_1NEGATE])
+
+    return op_push_bytes(data_len) + data
+
+
+def push_script(data: str, *, minimal=True) -> str:
+    """Returns pushed data to the script, automatically respecting BIP62 "minimal encoding" rules.
+    Input data is hex, returns hex."""
+    return push_script_bytes(bytes.fromhex(data), minimal=minimal).hex()
+
 
 def sha256(x):
     x = to_bytes(x, 'utf8')
@@ -257,16 +474,30 @@ def i2o_ECPublicKey(pubkey, compressed=False):
 # end pywallet openssl private key implementation
 
 
-############ functions from pywallet #####################
-def hash_160(public_key):
+def ripemd160(x: bytes) -> bytes:
     try:
+        # First, try openssl
         md = hashlib.new('ripemd160')
-        md.update(sha256(public_key))
+        md.update(x)
         return md.digest()
-    except BaseException:
-        from . import ripemd
-        md = ripemd.new(sha256(public_key))
-        return md.digest()
+    except:
+        # Ripemd160 missing from openssl, fall-back to pycryptodomex
+        try:
+            import Crypto
+            from Crypto.Hash import RIPEMD160
+            md = RIPEMD160.new()
+            md.update(x)
+            return md.digest()
+        except:
+            # If all else fails, fall-back to python-only implementation
+            from . import ripemd
+            md = ripemd.new(x)
+            return md.digest()
+
+
+############ functions from pywallet #####################
+def hash_160(public_key: bytes) -> bytes:
+    return ripemd160(sha256(public_key))
 
 
 def hash160_to_b58_address(h160, addrtype):
@@ -444,7 +675,7 @@ def deserialize_privkey(key, *, net=None):
                              'but last byte is 0x{:02x} != 0x01'.format(vch[33]))
         return txin_type, vch[1:33], compressed
     else:
-        raise ValueError("cannot deserialize", key)
+        raise ValueError("Not a valid private key: '%s'" % key)
 
 def regenerate_key(pk):
     assert len(pk) == 32

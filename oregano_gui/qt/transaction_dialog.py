@@ -29,13 +29,13 @@ import json
 import time
 
 from enum import Enum, auto
+from typing import Optional
 
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
 
-from oregano import cashacct
-from oregano import web
+from oregano import cashacct, token, web
 
 from oregano.address import Address, PublicKey, ScriptOutput
 from oregano.bitcoin import base_encode
@@ -56,8 +56,8 @@ else:
     # On Linux & macOS it looks fine so we go with the more fancy unicode
     SCHNORR_SIGIL = "ⓢ"
 
-def show_transaction(tx, parent, desc=None, prompt_if_unsaved=False):
-    d = TxDialog(tx, parent, desc, prompt_if_unsaved)
+def show_transaction(tx, parent, desc=None, prompt_if_unsaved=False, *, broadcast_callback=None):
+    d = TxDialog(tx, parent, desc, prompt_if_unsaved, broadcast_callback=broadcast_callback)
     dialogs.append(d)
     d.show()
     return d
@@ -73,7 +73,7 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
         Freeze = auto()
         Unfreeze = auto()
 
-    def __init__(self, tx, parent, desc, prompt_if_unsaved):
+    def __init__(self, tx, parent, desc, prompt_if_unsaved, *, broadcast_callback=None):
         '''Transactions in the wallet will show their description.
         Pass desc to give a description for txs not yet in the wallet.
         '''
@@ -85,6 +85,7 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
         self.tx = copy.deepcopy(tx)
         self.tx.deserialize()
         self.main_window = parent
+        self.token_meta = self.main_window.token_meta
         self.wallet = parent.wallet
         self.prompt_if_unsaved = prompt_if_unsaved
         self.saved = False
@@ -95,6 +96,7 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
         self.tx_hash = self.tx.txid_fast() if self.tx.raw and self.tx.is_complete() else None
         self.tx_height = self.wallet.get_tx_height(self.tx_hash)[0] or None
         self.block_hash = None
+        self.extra_broadcast_callback = broadcast_callback
         Weak.finalization_print_error(self)  # track object lifecycle
 
         self.setMinimumWidth(750)
@@ -206,6 +208,10 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
         parent.history_updated_signal.connect(self.update_tx_if_in_wallet)
         parent.labels_updated_signal.connect(self.update_tx_if_in_wallet)
         parent.network_signal.connect(self.got_verified_tx)
+        parent.gui_object.token_metadata_updated_signal.connect(self.on_token_metadata_updated)
+
+    def on_token_metadata_updated(self, tid: str):
+        self.update()
 
     @classmethod
     def _make_freeze_button_text(cls, op: FreezeOp = FreezeOp.Freeze, num_coins: int = 0) -> str:
@@ -272,6 +278,20 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
                 self.update()
                 # broadcast button will re-enable if we got nothing from server and >= BROADCAST_COOLDOWN_SECS elapsed
                 QTimer.singleShot(int(self.BROADCAST_COOLDOWN_SECS * 1e3 + 100), self.update)
+            if self.extra_broadcast_callback is not None:
+                # extra_broadcast_callback may have signature: foo(success, tx) or foo(success) -- decide which
+                import inspect
+                params = inspect.signature(self.extra_broadcast_callback).parameters
+                n_non_default_args = sum(p.default is p.empty for name, p in params.items())
+                args = [success]
+                if n_non_default_args > 1:
+                    # Accepts at least 2 args
+                    args += [self.tx]
+                if n_non_default_args > 2:
+                    # Accepts at least 3 args
+                    args += [self]
+                self.extra_broadcast_callback(*args)
+
         self.main_window.push_top_level_window(self)
         try:
             self.main_window.broadcast_transaction(self.tx, self.desc, callback=broadcast_done)
@@ -321,6 +341,8 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
                 try: parent.network_signal.disconnect(self.got_verified_tx)
                 except TypeError: pass
                 try: parent.labels_updated_signal.disconnect(self.update_tx_if_in_wallet)
+                except TypeError: pass
+                try: parent.gui_object.token_metadata_updated_signal.disconnect(self.on_token_metadata_updated)
                 except TypeError: pass
                 for slot in self.cashaddr_signal_slots:
                     try: parent.gui_object.cashaddr_toggled_signal.disconnect(slot)
@@ -412,9 +434,13 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
         desc = self.desc
         base_unit = self.main_window.base_unit()
         format_amount = self.main_window.format_amount
-        delta2, info2 = self.wallet.get_tx_extended_info(self.tx)
+        delta2, info3 = self.wallet.get_tx_extended_info(self.tx, ver=3)
         spends_coins_mine = delta2.spends_coins_mine
-        tx_hash, status, label, can_broadcast, amount, fee, height, conf, timestamp, exp_n, status_enum = info2
+        (tx_hash, status, label, can_broadcast, amount, fee, height, conf, timestamp, exp_n, status_enum,
+         input_token_data) = info3
+        for i, txin in enumerate(self.tx.inputs()):
+            if 'token_data' not in txin:
+                txin['token_data'] = input_token_data[i]
         self.tx_height = height or self.tx.ephemeral.get('block_height') or None
         self.tx_hash = tx_hash
         desc = label or desc
@@ -609,6 +635,32 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
         self.main_window.gui_object.cashaddr_toggled_signal.connect(self.update_io)
         self.update_io()
 
+    def format_token_amount(self, tid, amt, append_tokentoshis=True):
+        return self.token_meta.format_amount(tid, amt, append_tokentoshis=append_tokentoshis)
+
+    def format_token_name(self, tid, append_parenthetical=True):
+        dname = self.token_meta.format_token_display_name(tid, format_str="{token_name} {token_symbol}")
+        if append_parenthetical and dname != tid:
+            # Append actual category id here
+            dname += " (" + tid + ")"
+        return dname
+
+    def _tok2str(self, tok: Optional[token.OutputData]) -> str:
+        if not tok:
+            return repr(tok)
+        tid = tok.id_hex
+        dname = self.format_token_name(tid)
+        ret = f"CashToken - " + _('Category') + f": {dname}"
+        if tok.has_amount():
+            formatted_amt = self.format_token_amount(tid, tok.amount)
+            ret += " - " + _('Fungible Amount') + ": " + formatted_amt
+        if tok.has_nft():
+            ret += f" - NFT"
+            if tok.has_commitment_length():
+                ret += ": " + tok.commitment[:token.MAX_CONSENSUS_COMMITMENT_LENGTH].hex()
+            ret += " - " + token.get_nft_flag_text(tok)
+        return ret
+
     def update_io(self):
         i_text = self.i_text
         o_text = self.o_text
@@ -622,32 +674,53 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
         rec.setBackground(QBrush(ColorScheme.GREEN.as_color(background=True)))
         chg = QTextCharFormat(lnk)
         chg.setBackground(QBrush(ColorScheme.YELLOW.as_color(True)))
+        tok = QTextCharFormat(ext)
+        # CashTokens get a slightly smaller font
+        f = tok.font()
+        f.setPointSize(f.pointSize() - 1)
+        f.setItalic(True)
+        tok.setFont(f)
+        tok.setToolTip(_("This output contains a CashToken"))
+        tok_inp = QTextCharFormat(tok)
+        tok_inp.setToolTip(_("This input contains a CashToken"))
+
         rec_ct, chg_ct = 0, 0
 
         def text_format(addr):
             nonlocal rec_ct, chg_ct
-            if isinstance(addr, Address) and self.wallet.is_mine(addr):
-                if self.wallet.is_change(addr):
-                    chg_ct += 1
-                    chg2 = QTextCharFormat(chg)
-                    chg2.setAnchorHref(addr.to_ui_string())
-                    return chg2
-                else:
-                    rec_ct += 1
-                    rec2 = QTextCharFormat(rec)
-                    rec2.setAnchorHref(addr.to_ui_string())
-                    return rec2
-            return ext
+            ret = None
+            try:
+                if isinstance(addr, Address) and self.wallet.is_mine(addr):
+                    if self.wallet.is_change(addr):
+                        chg_ct += 1
+                        chg2 = QTextCharFormat(chg)
+                        chg2.setAnchorHref(addr.to_ui_string())
+                        ret = chg2
+                        return ret
+                    else:
+                        rec_ct += 1
+                        rec2 = QTextCharFormat(rec)
+                        rec2.setAnchorHref(addr.to_ui_string())
+                        ret = rec2
+                        return ret
+                ret = QTextCharFormat(ext)
+                return ret
+            finally:
+                if ret and isinstance(addr, Address) and addr.to_ui_string() != addr.to_token_string():
+                    tt = ret.toolTip()
+                    tt = (tt + '<br><br>'
+                          + _('Token-aware encoding:') + ' <b><i>' + addr.to_token_string())
+                    ret.setToolTip(tt)
 
         def format_amount(amt):
-            return self.main_window.format_amount(amt, whitespaces = True)
+            return self.main_window.format_amount(amt, whitespaces=True)
 
         i_text.clear()
         cursor = i_text.textCursor()
         has_schnorr = False
         for i, x in enumerate(self.tx.fetched_inputs() or self.tx.inputs()):
             a_name = f"input {i}"
-            for fmt in (ext, rec, chg, lnk):
+            for fmt in (ext, rec, chg, lnk, tok_inp):
                 fmt.setAnchorNames([a_name])  # anchor name for this line (remember input#); used by context menu creation
             if x['type'] == 'coinbase':
                 cursor.insertText('coinbase', ext)
@@ -674,6 +747,20 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
                     # Schnorr
                     cursor.insertText(' {}'.format(SCHNORR_SIGIL), ext)
                     has_schnorr = True
+                if x.get('token_data'):
+                    cursor.insertBlock()
+                    cr_text = '\u21b3 '
+                    cursor.insertText(cr_text, ext)
+                    input_token_text = self._tok2str(x['token_data'])
+                    fmt = text_format(addr)
+                    # Set token background color to a slightly different shade of the change/receive color
+                    brush = fmt.background()
+                    color = brush.color()
+                    color.setAlpha(0x77)
+                    brush.setColor(color)
+                    tokfmt = QTextCharFormat(tok_inp)
+                    tokfmt.setBackground(brush)
+                    cursor.insertText(input_token_text, tokfmt)
             cursor.insertBlock()
 
         self.schnorr_label.setVisible(has_schnorr)
@@ -682,10 +769,11 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
         cursor = o_text.textCursor()
         ca_script = None
         opret_ct = 0
-        for i, tup in enumerate(self.tx.outputs()):
+        for i, tup0 in enumerate(self.tx.outputs(tokens=True)):
             my_addr_in_script = None
+            tup, token_data = tup0
             typ, addr, v = tup
-            for fmt in (ext, rec, chg, lnk):
+            for fmt in (ext, rec, chg, lnk, tok):
                 fmt.setAnchorNames([f"output {i}"])  # anchor name for this line (remember input#); used by context menu creation
             # CashAccounts support
             if isinstance(addr, ScriptOutput) and addr.is_opreturn():
@@ -727,15 +815,29 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
             # /CashAccounts support
             # Mark B. Lundeberg's patented output formatter logic™
             if v is not None:
-                if len(addrstr) > 42: # for long outputs, make a linebreak.
+                if len(addrstr) > 42:  # for long outputs, make a linebreak.
                     cursor.insertBlock()
                     addrstr = '\u21b3'
                     cursor.insertText(addrstr, ext)
                 # insert enough spaces until column 43, to line up amounts
                 cursor.insertText(' '*(43 - len(addrstr)), ext)
                 cursor.insertText(format_amount(v), ext)
-            cursor.insertBlock()
             # /Mark B. Lundeberg's patented output formatting logic™
+            if token_data is not None:
+                tokstr = self._tok2str(token_data)
+                cursor.insertBlock()
+                cr_text = '\u21b3 '
+                cursor.insertText(cr_text, ext)
+                fmt = text_format(addr)
+                # Set token background color to a slightly different shade of the change/receive color
+                brush = fmt.background()
+                color = brush.color()
+                color.setAlpha(0x77)
+                brush.setColor(color)
+                tokfmt = QTextCharFormat(tok)
+                tokfmt.setBackground(brush)
+                cursor.insertText(tokstr, tokfmt)
+            cursor.insertBlock()
 
         # Cash Accounts support
         if ca_script:
@@ -784,6 +886,25 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
             # target was a txid, open new tx dialog
             self.main_window.do_process_from_txid(txid=target, parent=self)
 
+    def _create_token_specific_context_menu_options(self, token_data, io_text) -> list:
+        ret = []
+        if token_data:
+            id_hex = token_data.id_hex
+            dname = self.format_token_name(id_hex, append_parenthetical=False)
+            if dname != id_hex and dname:
+                ret += [(_("Copy Token Name"), lambda: self._copy_to_clipboard(dname, io_text))]
+            ret += [(_("Copy Token Category ID"), lambda: self._copy_to_clipboard(id_hex, io_text))]
+            if token_data.has_amount():
+                formatted_amt = self.format_token_amount(id_hex, token_data.amount, append_tokentoshis=False)
+                raw_amt = str(token_data.amount)
+                ret += [(_("Copy Token Amount"), lambda: self._copy_to_clipboard(formatted_amt, io_text))]
+                if raw_amt != formatted_amt:
+                    ret += [(_("Copy Token Amount (Raw)"), lambda: self._copy_to_clipboard(raw_amt, io_text))]
+            if token_data.has_commitment_length():
+                ret += [(_("Copy Token Commitment"), lambda: self._copy_to_clipboard(token_data.commitment.hex(),
+                                                                                     io_text))]
+        return ret
+
     def on_context_menu_for_inputs(self, pos):
         i_text = self.i_text
         menu = QMenu()
@@ -821,6 +942,9 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
                 if isinstance(value, int):
                     value_fmtd = self.main_window.format_amount(value)
                     copy_list += [ ( _("Copy Amount"), lambda: self._copy_to_clipboard(value_fmtd, i_text) ) ]
+                token_data = inp.get('token_data')
+                copy_list += self._create_token_specific_context_menu_options(token_data, i_text)
+
         except (TypeError, ValueError, IndexError, KeyError, AttributeError) as e:
             self.print_error("Inputs right-click menu exception:", repr(e))
 
@@ -839,9 +963,11 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
         menu.exec_(global_pos)
 
     def _add_addr_to_io_menu_lists_for_widget(self, addr, show_list, copy_list, widget):
+        hide_token_aware = False
         if hasattr(addr, 'to_ui_string'):
             addr_text = addr.to_ui_string()
             if isinstance(addr, Address) and self.wallet.is_mine(addr):
+                hide_token_aware = self.wallet.is_hw_without_cashtoken_support()
                 show_list += [ ( _("Address Details"), lambda: self._open_internal_link(addr_text) ) ]
                 addr_URL = web.BE_URL(self.main_window.config, 'addr', addr)
                 if addr_URL:
@@ -853,6 +979,11 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
             else:
                 action_text = _("Copy Address")
             copy_list += [ ( action_text, lambda: self._copy_to_clipboard(addr_text, widget) ) ]
+            if isinstance(addr, Address) and not hide_token_aware:
+                token_text = addr.to_token_string()
+                if token_text != addr_text:
+                    copy_list += [(_("Copy Address") + ' ' + _("(token-aware)"),
+                                   lambda: self._copy_to_clipboard(token_text, widget))]
             # also add script hex copy to clipboard
             if isinstance(addr, ScriptOutput):
                 hex_text = addr.to_script().hex() or ''
@@ -875,12 +1006,14 @@ class TxDialog(QDialog, MessageBoxMixin, PrintError):
             i = int(name.split()[1])  # split "output N", translate N -> int
             ignored, addr, value = (self.tx.outputs())[i]
             ca_script = (isinstance(addr, cashacct.ScriptOutput) and addr) or None
+            token_data = self.tx.token_datas()[i]
             menu.addAction(_("Output") + " #" + str(i)).setDisabled(True)
             menu.addSeparator()
             self._add_addr_to_io_menu_lists_for_widget(addr, show_list, copy_list, o_text)
             if isinstance(value, int):
                 value_fmtd = self.main_window.format_amount(value)
                 copy_list += [ ( _("Copy Amount"), lambda: self._copy_to_clipboard(value_fmtd, o_text) ) ]
+            copy_list += self._create_token_specific_context_menu_options(token_data, o_text)
             if ca_script:
                 copy_list += [ ( _("Copy Address (Embedded)"), lambda: self._copy_to_clipboard(ca_script.address.to_ui_string(), o_text) ) ]
                 if ca_script.is_complete() and self.tx_hash:

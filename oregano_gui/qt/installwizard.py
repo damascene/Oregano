@@ -185,7 +185,7 @@ class InstallWizard(QDialog, MessageBoxMixin, BaseWizard):
         wallet_folder = os.path.dirname(self.storage.path)
 
         def on_choose():
-            path, __ = QFileDialog.getOpenFileName(self, "Select your wallet file", wallet_folder)
+            path, __ = QFileDialog.getOpenFileName(self, _("Select your wallet file"), wallet_folder)
             if path:
                 self.name_e.setText(path)
 
@@ -486,6 +486,29 @@ class InstallWizard(QDialog, MessageBoxMixin, BaseWizard):
         return clayout.selected_index()
 
     @wizard_dialog
+    def input_date_dialog(self, run_next, title, message, default_time, minimum_time=0, maximum_time=None):
+        vbox = QVBoxLayout()
+        vbox.addWidget(WWLabel(message))
+        de = QDateEdit()
+        de.setDateTime(QDateTime.fromTime_t(default_time))
+        de.setMinimumDateTime(QDateTime.fromSecsSinceEpoch(int(minimum_time)))
+        de.setCalendarPopup(True)  # Enable calendar popup
+        if maximum_time is not None and maximum_time >= minimum_time:
+            de.setMaximumDateTime(QDateTime.fromSecsSinceEpoch(int(maximum_time)))
+        de.setDisplayFormat("MMMM dd yyyy")
+        def test():
+            d = de.dateTime().toSecsSinceEpoch()
+            mn = de.minimumDateTime().toSecsSinceEpoch()
+            mx = de.maximumDateTime().toSecsSinceEpoch()
+            is_ok = mn <= d <= mx
+            self.next_button.setEnabled(is_ok)
+            return is_ok
+        de.dateChanged.connect(test)
+        vbox.addWidget(de)
+        self.exec_layout(vbox, title, next_enabled=test())
+        return de.dateTime().toSecsSinceEpoch()
+
+    @wizard_dialog
     def line_dialog(self, run_next, title, message, default, test, warning=''):
         vbox = QVBoxLayout()
         vbox.addWidget(WWLabel(message))
@@ -617,26 +640,6 @@ class InstallWizard(QDialog, MessageBoxMixin, BaseWizard):
             self.linux_hw_wallet_support_dialog = None
         else:
             self.show_error("Linux only facility. FIXME!")
-
-    def showEvent(self, event):
-        ret = super().showEvent(event)
-        from oregano import networks
-        if networks.net is networks.TaxCoinNet and not self.config.get("have_shown_taxcoin_dialog"):
-            self.config.set_key("have_shown_taxcoin_dialog", True)
-            weakSelf = weakref.ref(self)
-            def do_dialog():
-                slf = weakSelf()
-                if not slf:
-                    return
-                QMessageBox.information(slf, _("Oregano - Tax Coin"),
-                                        _("For TaxCoin, your existing wallet files and configuration have "
-                                          "been duplicated in the subdirectory taxcoin/ within your Oregano "
-                                          "directory.\n\n"
-                                          "To use TaxCoin, you should select a server manually, and then choose one of "
-                                          "the starred servers.\n\n"
-                                          "After selecting a server, select a wallet file to open."))
-            QTimer.singleShot(10, do_dialog)
-        return ret
 
 
 class DerivationPathScanner(QThread):

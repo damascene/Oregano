@@ -281,6 +281,10 @@ class ElectrumGui(PrintError):
         utils.NSLog("GUI instance created, splash screen 2 presented")
 
     def createAndShowUI(self):
+        # First we set-up the iOS 15+ work-around colors..
+        CustomNavController.topNavBGColor = utils.uicolor_custom('nav')
+        CustomNavController.topNavTextColor = UIColor.whiteColor
+
         self.helper = GuiHelper.alloc().init()
 
         self.tabController = MyTabBarController.alloc().init().autorelease()
@@ -1238,9 +1242,15 @@ class ElectrumGui(PrintError):
             amount = out.get('amount')
             label = out.get('label')
             message = out.get('message')
+            op_return = out.get('op_return')
+            op_return_raw = out.get('op_return_raw')
+            op_return_is_raw = False
+            if op_return_raw is not None:
+                op_return_is_raw = True
+                op_return = op_return_raw
             # use label as description (not BIP21 compliant)
             if self.sendVC:
-                self.sendVC.onPayTo_message_amount_(address,message,amount)
+                self.sendVC.onPayTo_message_amount_opReturn_isRaw_(address,message,amount,op_return,op_return_is_raw)
                 return True
             else:
                 self.show_error("Oops! Something went wrong! Email the developers!")
@@ -1474,9 +1484,13 @@ class ElectrumGui(PrintError):
         self.daemon = None
         self.dismiss_downloading_notif()
         utils.cleanup_tmp_dir()
+        wd = wallets.WalletsMgr.wallets_dir()
+        if wd: utils.cleanup_wallet_dir(wd)  # on newer iOS for some reason *.tmp.PID remain..
 
     def start_daemon(self):
         if self.daemon_is_running(): return
+        wd = wallets.WalletsMgr.wallets_dir()
+        if wd: utils.cleanup_wallet_dir(wd)  # on newer iOS for some reason *.tmp.PID remain..
         import oregano.daemon as ed
         try:
             # Force remove of lock file so the code below cuts to the chase and starts a new daemon without
@@ -1663,7 +1677,7 @@ class ElectrumGui(PrintError):
         path = os.path.join(wallets.WalletsMgr.wallets_dir(), wallet_name)
         storage = WalletStorage(path, manual_upgrades=True)
         if not storage.file_exists():
-            onFailure("Wallet File Not Found")
+            onFailure(_("Wallet file not found"))
             return
 
         def DoSwicheroo(pw = None) -> None:
@@ -1726,7 +1740,7 @@ class ElectrumGui(PrintError):
     def show_wallet_share_actions(self, info : wallets.WalletsMgr.Info, vc : UIViewController = None, ipadAnchor : object = None, warnIfUnsafe : bool = True) -> None:
         if vc is None: vc = self.get_presented_viewcontroller()
         if not os.path.exists(info.full_path):
-            self.show_error("Wallet file not found", vc = vc)
+            self.show_error(_("Wallet file not found"), vc = vc)
             return
         if warnIfUnsafe:
             try:
@@ -1756,7 +1770,7 @@ class ElectrumGui(PrintError):
                     utils.show_share_actions(vc = waitDlg, fileName = fn, ipadAnchor = ipadAnchor, objectName = _('Wallet file'),
                                              finishedCompletion = lambda x: Dismiss())
                 else:
-                    def MyCompl() -> None: self.show_error("Could not copy wallet file", vc = vc)
+                    def MyCompl() -> None: self.show_error(_("Could not copy wallet file"), vc = vc)
                     Dismiss(MyCompl, False)
             except:
                 err = str(sys.exc_info()[1])
@@ -1848,7 +1862,7 @@ class ElectrumGui(PrintError):
             if not isinstance(storage, WalletStorage):
                 raise ValueError('usingStorage parameter needs to be a WalletStorage instance or a string path!')
             if not storage.file_exists():
-                raise WalletFileNotFound('Wallet File Not Found')
+                raise WalletFileNotFound(_('Wallet file not found'))
             wallet_name = os.path.split(storage.path)[-1]
             if not storage.is_encrypted():
                 callBack(None)

@@ -19,7 +19,7 @@ RUN echo deb ${UBUNTU_MIRROR} ${UBUNTUDIST} main restricted universe multiverse 
         gnupg2=2.2.27-3ubuntu2.1 \
         ca-certificates=20211016 \
         wget=1.21.2-2ubuntu1 \
-        git=1:2.34.1-1ubuntu1.4 \
+        git=1:2.34.1-1ubuntu1.9 \
         p7zip-full=16.02+dfsg-8 \
         make=4.3-4.1build1 \
         autotools-dev=20220109.1 \
@@ -37,11 +37,11 @@ RUN echo deb ${UBUNTU_MIRROR} ${UBUNTUDIST} main restricted universe multiverse 
 COPY winehq.key /tmp
 
 ENV WINEDIST=devel
-ENV WINEVERSION=7.7~${UBUNTUDIST}-1
+ENV WINEVERSION=9.0.0~${UBUNTUDIST}-1
 
 RUN echo "78b185fabdb323971d13bd329fefc8038e08559aa51c4996de18db0639a51df6 /tmp/winehq.key" | sha256sum -c - && \
-    apt-key add /tmp/winehq.key && \
-    echo deb https://dl.winehq.org/wine-builds/ubuntu/ ${UBUNTUDIST} main >> /etc/apt/sources.list && \
+    cat /tmp/winehq.key | gpg --dearmor -o /etc/apt/keyrings/winehq.gpg && \
+    echo deb [signed-by=/etc/apt/keyrings/winehq.gpg] https://dl.winehq.org/wine-builds/ubuntu/ ${UBUNTUDIST} main >> /etc/apt/sources.list.d/winehq.list && \
     apt-get update -q && \
     apt-get install -qy \
         wine-${WINEDIST}-amd64:amd64=${WINEVERSION} \
@@ -51,17 +51,17 @@ RUN echo "78b185fabdb323971d13bd329fefc8038e08559aa51c4996de18db0639a51df6 /tmp/
         # cabextract is needed for winetricks to install the .NET framework
         cabextract=1.9-3 \
         # xvfb is needed to launch the Visual Studio installer
-        xvfb=2:21.1.3-2ubuntu2.1 \
+        xvfb=2:21.1.4-2ubuntu1.7~22.04.10 \
         # winbind is needed for the Visual Studio installer and cl.exe PDB generation
-        winbind=2:4.15.9+dfsg-0ubuntu0.2
+        winbind=2:4.15.13+dfsg-0ubuntu1.6
 
 RUN rm -rf /var/lib/apt/lists/* && \
     apt-get autoremove -y && \
     apt-get clean
 
-RUN wget -q -O /tmp/winetricks https://raw.githubusercontent.com/Winetricks/winetricks/9c97d44b9b68a1b09e244e46f9ae0831ab35c315/src/winetricks && \
+RUN wget -q -O /tmp/winetricks https://raw.githubusercontent.com/Winetricks/winetricks/a9a556719e4fd28fc5984a963e2d666ec809f554/src/winetricks && \
     chmod +x /tmp/winetricks && \
-    echo "311c8c223bb83a7558b9e51197a9ccf7182bbd63849c64827b87bbc5f627f5cb /tmp/winetricks" | sha256sum -c -
+    echo "8127fbe3b6c9c996258e8fc08d05ac72ef11cb1465c5fe0d13e9d28580ba99a7 /tmp/winetricks" | sha256sum -c -
 
 ARG USER_ID
 ARG GROUP_ID
@@ -71,7 +71,7 @@ ENV WINEARCH=win32
 ENV WINEPREFIX=${HOME}/wine
 ENV WINEDEBUG=-all
 
-RUN mkdir -p ${WINEPREFIX}/drive_c/electroncash ; chown -R ${USER_ID}:${GROUP_ID} ${HOME}
+RUN mkdir -p ${WINEPREFIX}/drive_c/oregano ; chown -R ${USER_ID}:${GROUP_ID} ${HOME}
 
 # Make our UID/GID have an actual user name, this is needed so wineboot creates the right folders and
 # the Visual Studio installer does't fail in SHGetKnownFolderPath with error 0x80070003 (ERROR_PATH_NOT_FOUND).
@@ -92,8 +92,8 @@ RUN wineboot && \
 ENV DBUS_FATAL_WARNINGS=0
 
 RUN wget https://aka.ms/vs/16/release/installer -O /tmp/vs_installer.opc && \
-    # As of 2022-04-08 the checksum has changed and is not the same as in winetricks anymore
-    echo "ac9c4fbe7b2f777c6e46cb69d26d878f9119e3c32172d679bf70c0f003f4c790 /tmp/vs_installer.opc" | sha256sum -c - && \
+    # As of 2023-10-09 the checksum has changed and is not the same as in winetricks anymore
+    echo "0f0cc11f000593a064d419462a8467b529fed8075b21a605a40785baa3d2f611 /tmp/vs_installer.opc" | sha256sum -c - && \
     7z x -oopc /tmp/vs_installer.opc && rm /tmp/vs_installer.opc && \
     xvfb-run wine opc/Contents/vs_installer.exe install --quiet \
         --channelId VisualStudio.16.Release --channelUri "https://aka.ms/vs/16/release/channel" \

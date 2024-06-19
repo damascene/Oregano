@@ -26,13 +26,16 @@
 
 import os
 import sys
+import time
 import traceback
 from . import bitcoin
 from . import keystore
 from . import mnemonic
+from . import networks
+from . import rpa
 from . import util
-from .wallet import (ImportedAddressWallet, ImportedPrivkeyWallet,
-                     Standard_Wallet, Multisig_Wallet, wallet_types)
+from .wallet import (ImportedAddressWallet, ImportedPrivkeyWallet,RpaWallet,
+                     Standard_Wallet, Multisig_Wallet, MultiXPubWallet, wallet_types)
 from .i18n import _
 
 
@@ -48,6 +51,10 @@ class BaseWizard(util.PrintError):
         self.keystores = []
         self.is_kivy = config.get('gui') == 'kivy'
         self.seed_type = None
+        # RPA-specific - The timestamp when the seed was first generated. Is None on "restore seed", and for RPA
+        # wallets, requires user to input a time. On "create new seed": has the timestamp of the exact moment the seed
+        # was generated, minus 1 day. Only used by RPA wallets to determine what height to begin syncing from.
+        self.seed_ts = None
 
     def run(self, *args):
         action = args[0]
@@ -82,10 +89,12 @@ class BaseWizard(util.PrintError):
         message = '\n'.join([
             _("What kind of wallet do you want to create?")
         ])
+        # Comment out rpa for now until the server bugs have been fixed.
         wallet_kinds = [
             ('standard',  _("Standard wallet")),
             ('multisig',  _("Multi-signature wallet")),
             ('imported',  _("Import Ergon addresses or private keys")),
+            ('rpa', _("Reusable payment address (Beta)")),
         ]
         choices = [pair for pair in wallet_kinds if pair[0] in wallet_types]
         self.choice_dialog(title=title, message=message, choices=choices, run_next=self.on_wallet_type)
@@ -98,6 +107,8 @@ class BaseWizard(util.PrintError):
             action = 'choose_multisig'
         elif choice == 'imported':
             action = 'import_addresses_or_keys'
+        elif choice == 'rpa':
+            action = 'choose_keystore'
         self.run(action)
 
     def choose_multisig(self):
@@ -109,10 +120,18 @@ class BaseWizard(util.PrintError):
         self.multisig_dialog(run_next=on_multisig)
 
     def choose_keystore(self):
-        assert self.wallet_type in ['standard', 'multisig']
+        assert self.wallet_type in ['standard', 'multisig', 'rpa']
         i = len(self.keystores)
         title = _('Add cosigner') + ' (%d of %d)'%(i+1, self.n) if self.wallet_type=='multisig' else _('Keystore')
-        if self.wallet_type =='standard' or i==0:
+        if self.wallet_type == 'rpa':
+            message = (_('<B>WARNING:</B> RPA is an experimental wallet type.  Use it only with small amounts until you'
+                         ' are confident that it works reliably. <p>')
+                       + _('Do you want to create a new seed, or to restore a wallet using an existing seed?'))
+            choices = [
+                ('create_standard_seed', _('Create a new seed')),
+                ('restore_from_seed', _('I already have a seed')),
+            ]
+        elif self.wallet_type == 'standard' or i == 0:
             message = _('Do you want to create a new seed, or to restore a wallet using an existing seed?')
             choices = [
                 ('create_standard_seed', _('Create a new seed')),
@@ -169,20 +188,32 @@ class BaseWizard(util.PrintError):
 
     def restore_from_key(self):
         if self.wallet_type == 'standard':
-            v = keystore.is_master_key
-            title = _("Create keystore from a master key")
+            def is_valid(multiline_text: str):
+                # Note: We accept multiple xpubs/xprvs here. For multiples ultimately the wallet created will be
+                # a MultiXpubWallet in self.on_keystore()
+                ks = keystore.from_master_keys(multiline_text)
+                return len(ks) >= 1 and len(ks) == len(multiline_text.split())
+            title = _("Create keystore from one or more master key(s)")
             message = ' '.join([
                 _("To create a watching-only wallet, please enter your master public key (xpub/ypub/zpub)."),
-                _("To create a spending wallet, please enter a master private key (xprv/yprv/zprv).")
+                _("To create a spending wallet, please enter a master private key (xprv/yprv/zprv)."),
+                "\n\n" + _("You may enter multiple xpub and/or xprv keys to create a multi-xpub wallet."),
             ])
-            self.add_xpub_dialog(title=title, message=message, run_next=self.on_restore_from_key, is_valid=v)
+            self.add_xpub_dialog(title=title, message=message, run_next=self.on_restore_from_key, is_valid=is_valid,
+                                 allow_multi=True)
         else:
             i = len(self.keystores) + 1
             self.add_cosigner_dialog(index=i, run_next=self.on_restore_from_key, is_valid=keystore.is_bip32_key)
 
-    def on_restore_from_key(self, text):
-        k = keystore.from_master_key(text)
-        self.on_keystore(k)
+    def on_restore_from_key(self, maybe_multiline_text):
+        klist = keystore.from_master_keys(maybe_multiline_text)
+        multi_xpub = None
+        if self.wallet_type == 'standard':
+            if len(klist) > 1:
+                # Auto-detect multi_xpub case and indicate it
+                multi_xpub = klist
+        k = klist[0]
+        self.on_keystore(k, multi_xpub=multi_xpub)
 
     def on_hw_wallet_support(self):
         ''' Derived class InstallWizard for Qt implements this '''
@@ -317,6 +348,7 @@ class BaseWizard(util.PrintError):
         self.line_dialog(title=title, message=message, warning=warning, default='', test=lambda x:True, run_next=run_next)
 
     def restore_from_seed(self):
+        self.seed_ts = None
         self.opt_bip39 = True
         self.opt_ext = True
         test = mnemonic.is_seed # TODO FIX #bitcoin.is_seed if self.wallet_type == 'standard' else bitcoin.is_new_seed
@@ -350,17 +382,50 @@ class BaseWizard(util.PrintError):
         k = keystore.from_seed(seed, passphrase, derivation=derivation, seed_type='bip39')
         self.on_keystore(k)
 
-    def on_keystore(self, k):
+    def on_keystore(self, k, *, multi_xpub=None):
         has_xpub = isinstance(k, keystore.Xpub)
         if has_xpub:
             from .bitcoin import xpub_type
             t1 = xpub_type(k.xpub)
-        if self.wallet_type == 'standard':
-            if has_xpub and t1 not in ['standard']:
-                self.show_error(_('Wrong key type') + ' %s'%t1)
-                self.run('choose_keystore')
-                return
+        if self.wallet_type == 'rpa':
             self.keystores.append(k)
+            if self.seed_ts is None:
+                # Special case fo RPA and no seed_ts set (restore from seed mode), ask user when this seed was created
+                def on_date(timestamp):
+                    self.seed_ts = timestamp - (60 * 60 * 24)  # Modify it by 1 day in the past to be sure
+                    self.run('create_wallet')
+                default = int(time.time()) - 14 * (60 * 60 * 24)  # 2 weeks ago
+                self.input_date_dialog(run_next=on_date, default_time=default, minimum_time=1704000000,
+                                       title=_("Enter Seed Date"),
+                                       message=_("Please enter the approximate date that you first generated this RPA"
+                                                 " wallet seed.\n\n"
+                                                 "This helps to speed up the RPA wallet sync by not searching within"
+                                                 " blocks before this specified date, however if you choose a date that"
+                                                 " is too late, you may miss some early transactions"
+                                                 " (if you received funds before the date you pick here).\n\n"
+                                                 "If unsure, pick as early a date as possible."),
+                                       maximum_time=int(time.time()))
+            else:
+                self.run('create_wallet')
+        elif self.wallet_type == 'standard':
+            if multi_xpub:
+                # Multi-xpub case
+                seen = set()
+                for ks in multi_xpub:
+                    if ks.get_master_public_key() in seen:
+                        self.show_error(_('Error: duplicate master public key'))
+                        self.run('restore_from_key')
+                        return
+                    seen.add(ks.get_master_public_key())
+                self.keystores = multi_xpub
+                self.seed_type = None
+            else:
+                # Regular standard wallet
+                if has_xpub and t1 not in ['standard']:
+                    self.show_error(_('Wrong key type') + ' %s'%t1)
+                    self.run('choose_keystore')
+                    return
+                self.keystores.append(k)
             self.run('create_wallet')
         elif self.wallet_type == 'multisig':
             assert has_xpub
@@ -372,7 +437,7 @@ class BaseWizard(util.PrintError):
                 self.show_error(_('Error: duplicate master public key'))
                 self.run('choose_keystore')
                 return
-            if len(self.keystores)>0:
+            if len(self.keystores) > 0:
                 t2 = xpub_type(self.keystores[0].xpub)
                 if t1 != t2:
                     self.show_error(_('Cannot add this cosigner:') + '\n' + "Their key type is '%s', we are '%s'"%(t1, t2))
@@ -400,11 +465,25 @@ class BaseWizard(util.PrintError):
         for k in self.keystores:
             if k.may_have_password():
                 k.update_password(None, password)
-        if self.wallet_type == 'standard':
-            self.storage.put('seed_type', self.seed_type)
+        if self.wallet_type == 'rpa':
             keys = self.keystores[0].dump()
-            self.storage.put('keystore', keys)
-            self.wallet = Standard_Wallet(self.storage)
+            self.storage.put('keystore_rpa_aux', keys)
+            self.storage.put('seed_type', self.seed_type)
+            if self.seed_ts is not None:
+                self.storage.put('seed_ts', self.seed_ts)
+            self.wallet = RpaWallet.from_text(self.storage, "", password)
+        elif self.wallet_type == 'standard':
+            if len(self.keystores) > 1 and not self.seed_type:
+                # Multi-xpub case
+                self.storage.put('keystores', [k.dump() for k in self.keystores])
+                self.storage.write()
+                self.wallet = MultiXPubWallet(self.storage)
+            else:
+                # Normal standard wallet
+                self.storage.put('seed_type', self.seed_type)
+                keys = self.keystores[0].dump()
+                self.storage.put('keystore', keys)
+                self.wallet = Standard_Wallet(self.storage)
             self.run('create_addresses')
         elif self.wallet_type == 'multisig':
             for i, k in enumerate(self.keystores):
@@ -437,6 +516,8 @@ class BaseWizard(util.PrintError):
         else:
             # This should never happen.
             raise ValueError('Cannot make seed for unknown seed type ' + str(seed_type))
+        # For RPA: We save time this particular seed was created, minus 1 day for good measure
+        self.seed_ts = round(time.time() - (60 * 60 * 24))
         self.opt_bip39 = False
         f = lambda x: self.request_passphrase(seed, x)
         self.show_seed_dialog(run_next=f, seed_text=seed)

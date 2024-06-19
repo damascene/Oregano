@@ -19,7 +19,7 @@ import androidx.preference.EditTextPreference
 import androidx.preference.EditTextPreferenceDialogFragmentCompat
 import com.chaquo.python.PyException
 import com.chaquo.python.PyObject
-import kotlinx.android.synthetic.main.network.*
+import org.oregano.oregano3.databinding.NetworkBinding
 
 
 private val PROTOCOL_SUFFIX = ":s"
@@ -42,11 +42,15 @@ private fun updateNetwork() {
 
 
 class NetworkActivity : AppCompatActivity(R.layout.network) {
+    private lateinit var binding: NetworkBinding
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setupVerticalList(rvIfaces)
-        rvIfaces.adapter = IfacesAdapter(this)
+        binding = NetworkBinding.inflate(layoutInflater)
+        setupVerticalList(binding.rvIfaces)
+        binding.rvIfaces.adapter = IfacesAdapter(this)
         daemonUpdate.observe(this, { refresh() })
+        setContentView(binding.root)
     }
 
     fun refresh() {
@@ -63,15 +67,15 @@ class NetworkActivity : AppCompatActivity(R.layout.network) {
             status += "\n" + getString(R.string.chain_split,
                                        curChain.callAttr("get_base_height").toInt())
         }
-        tvStatus.text = status
+        binding.tvStatus.text = status
 
         val serverIface = daemonModel.network.get("interface")
         if (serverIface != null) {
-            tvServer.text = serverIface.callAttr("format_address").toString()
+            binding.tvServer.text = serverIface.callAttr("format_address").toString()
         } else {
-            tvServer.setText(R.string.not_connected)
+            binding.tvServer.setText(R.string.not_connected)
         }
-        (rvIfaces.adapter as IfacesAdapter).submitList(ifaces.map { IfaceModel(it, isSplit) })
+        (binding.rvIfaces.adapter as IfacesAdapter).submitList(ifaces.map { IfaceModel(it, isSplit) })
     }
 }
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 #
 # Oregano - lightweight Bitcoin client
-# Copyright (C) 2019 Axel Gembe <derago@gmail.com>
+# Copyright (C) 2019 Axel Gembe <axel@gembe.net>
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation files
@@ -95,7 +95,7 @@ class QrReaderCameraDialog(PrintError, MessageBoxMixin, QDialog):
         self.config = get_config()
 
         # Try to get the QR reader for this system
-        self.qrreader = get_qr_reader()
+        self.qrreader = get_qr_reader(self.config.get("qr_reader", None))
         if not self.qrreader:
             raise MissingQrDetectionLib(_("The platform QR detection library is not available."))
 

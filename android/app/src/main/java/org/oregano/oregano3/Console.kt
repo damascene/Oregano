@@ -4,19 +4,21 @@ import android.app.Application
 import android.os.Bundle
 import android.text.InputType
 import com.chaquo.python.utils.PythonConsoleActivity
-import kotlinx.android.synthetic.main.activity_console.*
+import org.oregano.oregano3.databinding.ActivityConsoleBinding
 
 
 val guiConsole by lazy { guiMod("console") }
 
 
 class ECConsoleActivity : PythonConsoleActivity() {
+    private lateinit var binding: ActivityConsoleBinding
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        binding = ActivityConsoleBinding.inflate(layoutInflater)
         // VISIBLE_PASSWORD is necessary to prevent some versions of the Google keyboard from
         // displaying the suggestion bar.
-        etInput.inputType = (InputType.TYPE_CLASS_TEXT +
+        binding.etInput.inputType = (InputType.TYPE_CLASS_TEXT +
                              InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS +
                              InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD)
     }

@@ -2,13 +2,11 @@
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
 
-import sys
-for i, x in enumerate(sys.argv):
-    if x == '--name':
-        cmdline_name = sys.argv[i+1]
-        break
-else:
-    raise BaseException('no name')
+import sys, os
+
+cmdline_name = os.environ.get("ELECTRONCASH_CMDLINE_NAME")
+if not cmdline_name:
+    raise RuntimeError('no name')
 
 home = 'C:\\oregano\\'
 
@@ -54,11 +52,11 @@ datas = [
     (home+'oregano/servers_testnet.json', 'oregano'),
     (home+'oregano/servers_testnet4.json', 'oregano'),
     (home+'oregano/servers_scalenet.json', 'oregano'),
-    (home+'oregano/servers_taxcoin.json', 'oregano'),
+    (home+'oregano/servers_regtest.json', 'oregano'),
+    (home+'oregano/servers_chipnet.json', 'oregano'),
     (home+'oregano/wordlist/english.txt', 'oregano/wordlist'),
     (home+'oregano/locale', 'oregano/locale'),
     (home+'oregano_gui/qt/data/ecsupplemental_win.ttf', 'oregano_gui/qt/data'),
-    (home+'oregano_gui/qt/data/ard_mone.mp3', 'oregano_gui/qt/data'),
     (home+'oregano_plugins', 'oregano_plugins'),
 ]
 datas += collect_data_files('trezorlib')
@@ -92,7 +90,10 @@ a = Analysis([home+'oregano-app',
              binaries=binaries,
              datas=datas,
              hiddenimports=hiddenimports,
-             hookspath=[])
+             hookspath=[],
+             # Prevent the console2.py dev-only script from pulling-in qtconsole and ipython
+             excludes=["qtconsole", "ipython"],
+             )
 
 
 rm_misc_datas = []

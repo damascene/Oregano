@@ -42,7 +42,7 @@ class LivePreferences(val sp: SharedPreferences, listen: Boolean = true)
         }
     }
 
-    override fun onSharedPreferenceChanged(sp: SharedPreferences, key: String) {
+    override fun onSharedPreferenceChanged(sp: SharedPreferences, key: String?) {
         prefs.get(key)?.setFromPreferences()
     }
 }

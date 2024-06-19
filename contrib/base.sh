@@ -194,8 +194,8 @@ export PYTHONHASHSEED=22
 export SOURCE_DATE_EPOCH=1530212462
 # Note, when upgrading Python, check the Windows python.exe embedded manifest for changes.
 # If the manifest changed, contrib/build-wine/manifest.xml needs to be updated.
-export PYTHON_VERSION=3.8.9  # Windows, OSX & Linux AppImage use this to determine what to download/build
-export PYTHON_SRC_TARBALL_HASH="5e391f3ec45da2954419cab0beaefd8be38895ea5ce33577c3ec14940c4b9572"  # If you change PYTHON_VERSION above, update this by downloading the tarball manually and doing a sha256sum on it.
+export PYTHON_VERSION=3.11.8  # Windows, OSX & Linux AppImage use this to determine what to download/build
+export PYTHON_SRC_TARBALL_HASH="9e06008c8901924395bc1da303eac567a729ae012baa182ab39269f650383bb3"  # If you change PYTHON_VERSION above, update this by downloading the tarball manually and doing a sha256sum on it.
 export DEFAULT_GIT_REPO=https://github.com/Ergon-moe/Oregano
 if [ -z "$GIT_REPO" ] ; then
     # If no override from env is present, use default. Support for overrides
@@ -273,7 +273,7 @@ if [ "${GIT_SUBMODULE_SKIP:-0}" -eq 0 ] ; then
         # See https://public-inbox.org/git/20191013064314.GA28018@sigill.intra.peff.net/
         gitflags="-c protocol.version=2"
     fi
-    git $gitflags submodule update --init --jobs 0 $GIT_SUBMODULE_FLAGS || fail "Failed to update git submodules"
+    git $gitflags submodule update --init --jobs 3 $GIT_SUBMODULE_FLAGS || fail "Failed to update git submodules"
 fi
 
 # This variable is set to avoid sourcing base.sh multiple times

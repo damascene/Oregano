@@ -58,6 +58,10 @@ class OSXQRDetect(AbstractQrCodeReader, PrintError):
     LIB = None
 
     @classmethod
+    def reader_name(cls) -> str:
+        return "macOS QR"
+
+    @classmethod
     def _init_func_args(cls):
         assert cls.LIB
         cls.LIB.context_create.restype = ctypes.c_void_p

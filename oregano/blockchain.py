@@ -33,56 +33,98 @@ from . import util
 from ctypes import c_uint32 as u32
 from .bitcoin import *
 
+
 class VerifyError(Exception):
-    '''Exception used for blockchain verification errors.'''
+    """Exception used for blockchain verification errors."""
+
 
 CHUNK_FORKS = -3
 CHUNK_BAD = -2
 CHUNK_LACKED_PROOF = -1
 CHUNK_ACCEPTED = 0
 
-def bits_to_work(bits):
-    return (1 << 256) // (bits_to_target(bits) + 1)
-
-def bits_to_target(bits):
-    if bits == 0:
-        return 0
-    size = bits >> 24
-    assert size <= 0x1d
-
-    word = bits & 0x00ffffff
-    assert 0x8000 <= word <= 0x7fffff
-
-    if size <= 3:
-        return word >> (8 * (3 - size))
-    else:
-        return word << (8 * (size - 3))
-
-def target_to_bits(target):
-    if target == 0:
-        return 0
-    target = min(target, MAX_TARGET)
-    size = (target.bit_length() + 7) // 8
-    mask64 = 0xffffffffffffffff
-    if size <= 3:
-        compact = (target & mask64) << (8 * (3 - size))
-    else:
-        compact = (target >> (8 * (size - 3))) & mask64
-
-    if compact & 0x00800000:
-        compact >>= 8
-        size += 1
-    assert compact == (compact & 0x007fffff)
-    assert size < 256
-    return compact | size << 24
-
-HEADER_SIZE = 80 # bytes
+HEADER_SIZE = 80  # bytes
 MAX_BITS = 0x1d0fffff
-MAX_TARGET = bits_to_target(MAX_BITS)
+MAX_BITS_REGTEST = 0x207fffff
+# see https://gitlab.com/bitcoin-cash-node/bitcoin-cash-node/-/blob/v24.0.0/src/chainparams.cpp#L98
+# Note: If we decide to support REGTEST this will need to come from regtest's networks.py params!
+MAX_TARGET = 0x0000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff  # compact: 0x1d0fffff
 # indicates no header in data file
 NULL_HEADER = bytes([0]) * HEADER_SIZE
 NULL_HASH_BYTES = bytes([0]) * 32
 NULL_HASH_HEX = NULL_HASH_BYTES.hex()
+
+
+def bits_to_work(bits):
+    target = bits_to_target(bits)
+    if not (0 < target < (1 << 256)):
+        return 0
+    return (1 << 256) // (target + 1)
+
+
+def _get_little_endian_num_bits(b: bytes) -> int:
+    """ Returns 1 + the position of the highest bit that is set in bytes b
+    or 0 if the bytes object is all 0's. Like BCHN's arith_uint256::bits() """
+    width = len(b)
+    for pos in range(width - 1, -1, -1):
+        if b[pos]:
+            for nbits in range(7, 0, -1):
+                if b[pos] & (1 << nbits):
+                    return 8 * pos + nbits + 1
+            return 8 * pos + 1
+    return 0
+
+
+def _get_little_endian_low64(b: bytes) -> int:
+    """ Like BCHN's arith_uint256::GetLow64() """
+    assert len(b) >= 8
+    return int.from_bytes(b[:8], byteorder='little', signed=False) & 0xff_ff_ff_ff_ff_ff_ff_ff
+
+
+def target_to_bits(target: int) -> int:
+    # arith_uint256::GetCompact in Bitcoin Cash Node
+    # see https://gitlab.com/bitcoin-cash-node/bitcoin-cash-node/-/blob/v24.0.0/src/arith_uint256.cpp#L230
+    if not (0 <= target < (1 << 256)):
+        raise Exception(f"target should be uint256. got {target!r}")
+    b = target.to_bytes(length=32, byteorder='little', signed=False)
+    nsize = (_get_little_endian_num_bits(b) + 7) // 8
+    if nsize <= 3:
+        ncompact = (_get_little_endian_low64(b) << (8 * (3 - nsize))) & 0xffffffff
+    else:
+        bn = (target >> (8 * (nsize - 3))).to_bytes(length=32, byteorder='little', signed=False)
+        ncompact = _get_little_endian_low64(bn) & 0xffffffff
+    # The 0x00800000 bit denotes the sign.
+    # Thus, if it is already set, divide the mantissa by 256 and increase the
+    # exponent.
+    if ncompact & 0x00800000:
+        ncompact >>= 8
+        nsize += 1
+    assert (ncompact & ~0x007fffff) == 0
+    assert nsize < 256
+    ncompact |= nsize << 24
+    return ncompact
+
+
+def bits_to_target(ncompact: int) -> int:
+    # arith_uint256::SetCompact in Bitcoin Cash Node
+    # see https://gitlab.com/bitcoin-cash-node/bitcoin-cash-node/-/blob/v24.0.0/src/arith_uint256.cpp#L208
+    if not (0 <= ncompact < (1 << 32)):
+        raise Exception(f"ncompact should be uint32. got {ncompact!r}")
+    nsize = ncompact >> 24
+    nword = ncompact & 0x007fffff
+    if nsize <= 3:
+        nword >>= 8 * (3 - nsize)
+        ret = nword
+    else:
+        ret = nword
+        ret <<= 8 * (nsize - 3)
+    # Check for negative, bit 24 represents sign of N
+    if nword != 0 and (ncompact & 0x00800000) != 0:
+        raise Exception("target cannot be negative")
+    if nword != 0 and ((nsize > 34) or (nword > 0xff and nsize > 33) or (nword > 0xffff and nsize > 32)):
+        raise Exception("target has overflown")
+    return ret
+
 
 def serialize_header(res):
     s = int_to_hex(res.get('version'), 4) \
@@ -266,9 +308,14 @@ class Blockchain(util.PrintError):
         # We do not need to check the block difficulty if the chain of linked header hashes was proven correct against our checkpoint.
         if bits is not None:
             # checkpoint BitcoinCash fork block
-#            if (header.get('block_height') == networks.net.BITCOIN_CASH_FORK_BLOCK_HEIGHT and hash_header(header) != networks.net.BITCOIN_CASH_FORK_BLOCK_HASH):
-#                err_str = "block at height %i is not cash chain fork block. hash %s" % (header.get('block_height'), hash_header(header))
-#                raise VerifyError(err_str)
+            block_height = header.get('block_height')
+            if (block_height == networks.net.BITCOIN_CASH_FORK_BLOCK_HEIGHT
+                    and hash_header(header) != networks.net.BITCOIN_CASH_FORK_BLOCK_HASH):
+                err_str = f"block at height {block_height} is not cash chain fork block. hash {hash_header(header)}"
+                raise VerifyError(err_str)
+            if networks.net.REGTEST:
+                # No PoW check for regtest, accept header at this point.
+                return
             if bits != header.get('bits'):
                 raise VerifyError("bits mismatch: %s vs %s" % (bits, header.get('bits')))
             target = bits_to_target(bits)
@@ -410,16 +457,17 @@ class Blockchain(util.PrintError):
         #In order to avoid a block in a very skewed timestamp to have too much
         #influence, we select the median of the 3 top most block as a start point
         #Reference: github.com/Bitcoin-ABC/bitcoin-abc/master/src/pow.cpp#L201
+        assert suitableheight >= 3
         blocks2 = self.read_header(suitableheight, chunk)
         blocks1 = self.read_header(suitableheight-1, chunk)
         blocks = self.read_header(suitableheight-2, chunk)
 
-        if (blocks['timestamp'] > blocks2['timestamp'] ):
-            blocks,blocks2 = blocks2,blocks
-        if (blocks['timestamp'] > blocks1['timestamp'] ):
-            blocks,blocks1 = blocks1,blocks
-        if (blocks1['timestamp'] > blocks2['timestamp'] ):
-            blocks1,blocks2 = blocks2,blocks1
+        if blocks['timestamp'] > blocks2['timestamp']:
+            blocks, blocks2 = blocks2, blocks
+        if blocks['timestamp'] > blocks1['timestamp']:
+            blocks, blocks1 = blocks1, blocks
+        if blocks1['timestamp'] > blocks2['timestamp']:
+            blocks1, blocks2 = blocks2, blocks1
 
         return blocks1['block_height']
 
@@ -460,8 +508,11 @@ class Blockchain(util.PrintError):
             anchor = prev
 
     def get_bits(self, header, chunk=None):
-        '''Returns bits for the given height'''
-
+        """Return bits for the given height."""
+        if networks.net.REGTEST:
+            # Regtest always has constant low-diff
+            return MAX_BITS_REGTEST
+        # Difficulty adjustment interval?
         height = header['block_height']
         prevheight = height-1
         ema_activation = networks.net.EMA_ACTIVATION_TIME

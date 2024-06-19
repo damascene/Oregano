@@ -65,7 +65,7 @@ private fun getCaption(): Caption {
             if (wallet.callAttr("is_fully_settled_down").toBoolean()) {
                 // get_balance returns the tuple (confirmed, unconfirmed, unmatured)
                 val balance = wallet.callAttr("get_balance").asList().get(0).toLong()
-                subtitle = ltr(formatSatoshisAndFiat(balance))
+                subtitle = ltr(formatSatoshisAndFiat(balance, commas=true))
             } else {
                 // get_addresses copies the list, which may be very large.
                 val addrCount = wallet.callAttr("get_receiving_addresses").asList().size +
@@ -107,7 +107,7 @@ class CaptionService : Service() {
             .setContentTitle(intent.extras!!.getString(EXTRA_TITLE))
             .setContentText(intent.extras!!.getString(EXTRA_SUBTITLE))
             .setContentIntent(PendingIntent.getActivity(
-                this, 0, Intent(this, MainActivity::class.java), 0))
+                this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
         startForeground(NOTIFICATION_ID, builder.build())
         return START_NOT_STICKY
     }

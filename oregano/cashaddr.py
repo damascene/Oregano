@@ -21,6 +21,7 @@
 
 _CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 
+
 def _polymod(values):
     """Internal function that computes the cashaddr checksum."""
     c = 1
@@ -40,6 +41,7 @@ def _polymod(values):
     retval= c ^ 1
     return retval
 
+
 def _prefix_expand(prefix):
     """Expand the prefix into values for checksum computation."""
     retval = bytearray(ord(x) & 0x1f for x in prefix)
@@ -47,12 +49,14 @@ def _prefix_expand(prefix):
     retval.append(0)
     return retval
 
+
 def _create_checksum(prefix, data):
     """Compute the checksum values given prefix and data."""
     values = _prefix_expand(prefix) + data + bytes(8)
     polymod = _polymod(values)
     # Return the polymod expanded into eight 5-bit elements
     return bytes((polymod >> 5 * (7 - i)) & 31 for i in range(8))
+
 
 def _convertbits(data, frombits, tobits, pad=True):
     """General power-of-2 base conversion."""
@@ -72,6 +76,7 @@ def _convertbits(data, frombits, tobits, pad=True):
         ret.append((acc << (tobits - bits)) & maxv)
 
     return ret
+
 
 def _pack_addr_data(kind, addr_hash):
     """Pack addr data with version byte"""
@@ -142,12 +147,15 @@ def _decode_payload(addr):
 
 PUBKEY_TYPE = 0
 SCRIPT_TYPE = 1
+TOKEN_PUBKEY_TYPE = 2
+TOKEN_SCRIPT_TYPE = 3
 
-def decode(address):
-    '''Given a cashaddr address, return a triple
+
+def decode(address, *, checktype=True):
+    """Given a cashaddr address, return a triple
 
           (prefix, kind, hash)
-    '''
+    """
     if not isinstance(address, str):
         raise TypeError('address must be a string')
 
@@ -174,13 +182,13 @@ def decode(address):
                          .format(len(addr_hash), size))
 
     kind = version >> 3
-    if kind not in (SCRIPT_TYPE, PUBKEY_TYPE):
-        raise ValueError('unrecognised address type {}'.format(kind))
+    if checktype and kind not in (SCRIPT_TYPE, PUBKEY_TYPE, TOKEN_PUBKEY_TYPE, TOKEN_SCRIPT_TYPE):
+        raise ValueError('unrecognized address type {}'.format(kind))
 
     return prefix, kind, addr_hash
 
 
-def encode(prefix, kind, addr_hash):
+def encode(prefix, kind, addr_hash, *, checktype=True):
     """Encode a cashaddr address without prefix and separator."""
     if not isinstance(prefix, str):
         raise TypeError('prefix must be a string')
@@ -188,7 +196,7 @@ def encode(prefix, kind, addr_hash):
     if not isinstance(addr_hash, (bytes, bytearray)):
         raise TypeError('addr_hash must be binary bytes')
 
-    if kind not in (SCRIPT_TYPE, PUBKEY_TYPE):
+    if checktype and kind not in (SCRIPT_TYPE, PUBKEY_TYPE, TOKEN_PUBKEY_TYPE, TOKEN_SCRIPT_TYPE):
         raise ValueError('unrecognised address type {}'.format(kind))
 
     payload = _pack_addr_data(kind, addr_hash)
@@ -196,6 +204,6 @@ def encode(prefix, kind, addr_hash):
     return ''.join([_CHARSET[d] for d in (payload + checksum)])
 
 
-def encode_full(prefix, kind, addr_hash):
+def encode_full(prefix, kind, addr_hash, *, checktype=True):
     """Encode a full cashaddr address, with prefix and separator."""
-    return ':'.join([prefix, encode(prefix, kind, addr_hash)])
+    return ':'.join([prefix, encode(prefix, kind, addr_hash, checktype=checktype)])

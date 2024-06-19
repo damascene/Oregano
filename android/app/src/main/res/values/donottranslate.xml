@@ -13,6 +13,7 @@
     <string name="test_value_signed">&#x200e;+42.12345678 XRG</string>
     <string name="test_value_and_fiat">&#x200e;0.12345678 XRG (98765.43 USD)</string>
     <string name="test_wallet">alpha</string>
+    <string name="test_status">waiting</string>
 
     <!-- On a medium-sized phone, with the default text size, this is two lines in portrait and
     one line in landscape. -->

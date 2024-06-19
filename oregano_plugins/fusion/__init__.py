@@ -35,6 +35,6 @@ description = [
     _('In addition, a blame protocol is used to mitigate time-wasting denial-of-service type attacks.')
 ]
 description_delimiter = ''
-available_for = ['qt', 'cmdline']
+available_for = ['qt', 'cmdline', 'android']
 # If default_on is set to True, this plugin is loaded by default on new installs
 default_on = True

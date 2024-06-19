@@ -1,16 +1,35 @@
 package org.oregano.oregano3
 
 import android.os.Bundle
+import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import androidx.appcompat.app.AlertDialog
 import com.chaquo.python.Kwarg
 import com.chaquo.python.PyObject
-import kotlinx.android.synthetic.main.main.*
-import kotlinx.android.synthetic.main.request_detail.*
-import kotlinx.android.synthetic.main.requests.*
+import org.oregano.oregano3.databinding.AmountBoxBinding
+import org.oregano.oregano3.databinding.RequestDetailBinding
+import org.oregano.oregano3.databinding.RequestsBinding
 
 
 class RequestsFragment : ListFragment(R.layout.requests, R.id.rvRequests) {
+    private var _binding: RequestsBinding? = null
+    private val binding get() = _binding!!
+
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View? {
+        super.onCreateView(inflater, container, savedInstanceState)
+        _binding = RequestsBinding.inflate(inflater, container, false)
+        return binding.root
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        _binding = null
+    }
 
     override fun onListModelCreated(listModel: ListModel) {
         with (listModel) {
@@ -22,7 +41,7 @@ class RequestsFragment : ListFragment(R.layout.requests, R.id.rvRequests) {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        btnAdd.setOnClickListener { showDialog(this, NewRequestDialog()) }
+        binding.btnAdd.setOnClickListener { showDialog(this, NewRequestDialog()) }
     }
 
     override fun onCreateAdapter() =
@@ -68,6 +87,9 @@ class RequestModel(wallet: PyObject, val request: PyObject) : ListItemModel(wall
 
 
 class RequestDialog : DetailDialog() {
+    private var _binding: RequestDetailBinding? = null
+    private val binding get() = _binding!!
+
     val address by lazy {
         clsAddress.callAttr("from_string", arguments!!.getString("address"))!!
     }
@@ -77,8 +99,9 @@ class RequestDialog : DetailDialog() {
     lateinit var amountBox: AmountBox
 
     override fun onBuildDialog(builder: AlertDialog.Builder) {
+        _binding = RequestDetailBinding.inflate(LayoutInflater.from(context))
         with (builder) {
-            setView(R.layout.request_detail)
+            setView(binding.root)
             setNegativeButton(android.R.string.cancel, null)
             setPositiveButton(android.R.string.ok, null)
             if (existingRequest != null) {
@@ -88,15 +111,15 @@ class RequestDialog : DetailDialog() {
     }
 
     override fun onShowDialog() {
-        amountBox = AmountBox(dialog)
+        amountBox = AmountBox(binding.incAmount)
         amountBox.listener = { updateUI() }
 
-        btnCopy.setOnClickListener {
+        binding.btnCopy.setOnClickListener {
             copyToClipboard(getUri(), R.string.request_uri)
         }
-        tvAddress.text = address.callAttr("to_ui_string").toString()
+        binding.tvAddress.text = address.callAttr("to_ui_string").toString()
 
-        etDescription.addAfterTextChangedListener { updateUI() }
+        binding.etDescription.addAfterTextChangedListener { updateUI() }
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { onOK() }
 
         if (existingRequest != null) {
@@ -112,14 +135,14 @@ class RequestDialog : DetailDialog() {
         if (request != null) {
             val model = RequestModel(wallet, request)
             amountBox.amount = model.amount
-            etDescription.setText(model.description)
+            binding.etDescription.setText(model.description)
         } else {
             amountBox.requestFocus()
         }
     }
 
     private fun updateUI() {
-        showQR(imgQR, getUri())
+        showQR(binding.imgQR, getUri())
     }
 
     private fun getUri(): String {
@@ -140,12 +163,12 @@ class RequestDialog : DetailDialog() {
 
             // If the dialog was opened from the Transactions screen, we should now switch to
             // the Requests screen so the user can verify that the request has been saved.
-            (activity as MainActivity).navBottom.selectedItemId = R.id.navRequests
+            (activity as MainActivity).binding.navBottom.selectedItemId = R.id.navRequests
         }
     }
 
     val description
-        get() = etDescription.text.toString()
+        get() = binding.etDescription.text.toString()
 }
 
 

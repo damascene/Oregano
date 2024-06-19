@@ -1,5 +1,6 @@
 <RCC>
   <qresource prefix="/" >
+    <file>icons/baton.png</file>
     <file>icons/cashacct-logo.png</file>
     <file>icons/cashacct-button-darkmode.png</file>
     <file>icons/oregano.svg</file>
@@ -13,9 +14,10 @@
     <file>icons/copy.png</file>
     <file>icons/digitalbitbox.png</file>
     <file>icons/digitalbitbox_unpaired.png</file>
-    <file>icons/expired.svg</file>
+    <file>icons/edit_nft.png</file>
     <file>icons/oregano_light_icon.svg</file>
     <file>icons/oregano_dark_icon.svg</file>
+    <file>icons/expired.svg</file>
     <file>icons/file.png</file>
     <file>icons/import.svg</file>
     <file>icons/import_dark_theme.svg</file>
@@ -26,6 +28,7 @@
     <file>icons/ledger_unpaired.png</file>
     <file>icons/lock.svg</file>
     <file>icons/microphone.png</file>
+    <file>icons/mutable.png</file>
     <file>icons/openalias-logo.svg</file>
     <file>icons/qrcode.svg</file>
     <file>icons/qrcode_white.svg</file>
@@ -53,6 +56,7 @@
     <file>icons/tab_contacts.png</file>
     <file>icons/tab_converter.svg</file>
     <file>icons/tab_converter_bw.svg</file>
+    <file>icons/tab_token.svg</file>
     <file>icons/cashshuffle_on_error.svg</file>
     <file>icons/cashshuffle_on.svg</file>
     <file>icons/cashshuffle_off.svg</file>
@@ -65,6 +69,7 @@
     <file>icons/tab_send.png</file>
     <file>icons/tor_logo.svg</file>
     <file>icons/speaker.png</file>
+    <file>icons/trash-10-24.png</file>
     <file>icons/trezor_unpaired.png</file>
     <file>icons/trezor.png</file>
     <file>icons/unconfirmed.svg</file>

@@ -7,7 +7,7 @@ import setuptools.command.sdist
 import os
 import sys
 import platform
-import imp
+import importlib.util
 import argparse
 
 with open('contrib/requirements/requirements.txt') as f:
@@ -19,10 +19,16 @@ with open('contrib/requirements/requirements-hw.txt') as f:
 with open('contrib/requirements/requirements-binaries.txt') as f:
     requirements_binaries = f.read().splitlines()
 
-version = imp.load_source('version', 'oregano/version.py')
+def load_source(module_name, module_path):
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
-if sys.version_info[:3] < (3, 6):
-    sys.exit("Error: Oregano requires Python version >= 3.6...")
+version = load_source('version', 'oregano/version.py')
+
+if sys.version_info[:3] < (3, 7):
+    sys.exit("Error: Oregano requires Python version >= 3.7...")
 
 data_files = []
 
@@ -123,9 +129,7 @@ class MakeAllBeforeSdist(setuptools.command.sdist.sdist):
 
 
 platform_package_data = {
-    'oregano_gui.qt': [
-        'data/ard_mone.mp3'
-    ],
+    'oregano_gui.qt': [],
 }
 
 if sys.platform in ('linux'):
@@ -149,12 +153,14 @@ setup(
     extras_require={
         'hardware': requirements_hw,
         'gui': requirements_binaries,
-        'all': requirements_hw + requirements_binaries
+        'console2': ['ipython', 'qtconsole'],  # For optional --console2 support in Qt GUI
+        'all': requirements_hw + requirements_binaries,
     },
     packages=[
         'oregano',
         'oregano.qrreaders',
         'oregano.slp',
+        'oregano.rpa',
         'oregano.tor',
         'oregano.utils',
         'oregano_gui',
@@ -168,7 +174,6 @@ setup(
         'oregano_plugins.email_requests',
         'oregano_plugins.hw_wallet',
         'oregano_plugins.keepkey',
-        'oregano_plugins.labels',
         'oregano_plugins.ledger',
         'oregano_plugins.trezor',
         'oregano_plugins.digitalbitbox',
@@ -183,7 +188,8 @@ setup(
             'servers_testnet.json',
             'servers_testnet4.json',
             'servers_scalenet.json',
-            'servers_taxcoin.json',
+            'servers_regtest.json',
+            'servers_chipnet.json',
             'currencies.json',
             'www/index.html',
             'wordlist/*.txt',

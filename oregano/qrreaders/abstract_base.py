@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 #
 # Oregano - lightweight Bitcoin client
-# Copyright (C) 2019 Axel Gembe <derago@gmail.com>
+# Copyright (C) 2019, 2023 Axel Gembe <axel@gembe.net>
 #
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation files
@@ -24,7 +24,7 @@
 # SOFTWARE.
 
 import ctypes
-from typing import List, Tuple
+from typing import List, Tuple, TypeVar
 from abc import ABC, abstractmethod
 
 QrCodePoint = Tuple[int, int]
@@ -56,6 +56,11 @@ class AbstractQrCodeReader(ABC):
     Abstract base class for QR code readers.
     """
 
+    @classmethod
+    @abstractmethod
+    def reader_name(cls) -> str:
+        pass
+
     def interval(self) -> float:
         ''' Reimplement to specify a time (in seconds) that the implementation
         recommends elapse between subsequent calls to read_qr_code.
@@ -74,3 +79,5 @@ class AbstractQrCodeReader(ABC):
         Reads a QR code from an image buffer in Y800 / GREY format.
         Returns a list of detected QR codes which includes their data and positions.
         """
+
+AbstractQrCodeReaderType = TypeVar('AbstractQrCodeReaderType', bound=AbstractQrCodeReader)

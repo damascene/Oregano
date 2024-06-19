@@ -34,7 +34,7 @@ from oregano import networks, schnorr
 from oregano.bitcoin import public_key_from_private_key
 from oregano.i18n import _, ngettext, pgettext
 from oregano.util import format_satoshis, do_in_main_thread, PrintError, ServerError, TxHashMismatch, TimeoutException
-from oregano.wallet import Standard_Wallet, Multisig_Wallet
+from oregano.wallet import Standard_Wallet, Multisig_Wallet, MultiXPubWallet, PrivateKeyMissing
 
 from . import encrypt
 from . import fusion_pb2 as pb
@@ -83,16 +83,18 @@ MAX_FEE = MAX_COMPONENT_FEERATE * 7 + MAX_EXCESS_FEE
 # (distinct tx inputs, and tx outputs)
 MIN_TX_COMPONENTS = 11
 
+
 def can_fuse_from(wallet):
     """We can only fuse from wallets that are p2pkh, and where we are able
     to extract the private key."""
-    return (not (wallet.is_watching_only() or wallet.is_hardware() or isinstance(wallet, Multisig_Wallet))
-            and networks.net is not networks.TaxCoinNet)
+    return (not wallet.is_watching_only() and not wallet.is_hardware() and not isinstance(wallet, Multisig_Wallet)
+            and wallet.can_fully_sign_for_all_addresses())
+
 
 def can_fuse_to(wallet):
     """We can only fuse to wallets that are p2pkh with HD generation. We do
     *not* need the private keys."""
-    return isinstance(wallet, Standard_Wallet) and networks.net is not networks.TaxCoinNet
+    return isinstance(wallet, (Standard_Wallet, MultiXPubWallet))
 
 
 
@@ -339,15 +341,23 @@ class Fusion(threading.Thread, PrintError):
         # get private keys and convert x_pubkeys to real pubkeys
         keypairs = dict()
         pubkeys = dict()
+        pubkeys_missing_privkeys = set()  # For MultiXPubWallet
         for xpubkey in xpubkeys_set:
             derivation = wallet.keystore.get_pubkey_derivation(xpubkey)
-            privkey = wallet.keystore.get_private_key(derivation, password)
+            try:
+                privkey = wallet.keystore.get_private_key(derivation, password)
+            except PrivateKeyMissing:
+                # This branch is here in case we ever decide to support MultiXPubWallet with missing privkeys
+                pubkeys_missing_privkeys.add(xpubkey)
+                continue
             pubkeyhex = public_key_from_private_key(*privkey)
             pubkey = bytes.fromhex(pubkeyhex)
             keypairs[pubkeyhex] = privkey
             pubkeys[xpubkey] = pubkey
 
-        coindict = {(c['prevout_hash'], c['prevout_n']): (pubkeys[c['x_pubkeys'][0]], c['value']) for c in coins}
+        coindict = {(c['prevout_hash'], c['prevout_n']): (pubkeys[c['x_pubkeys'][0]], c['value'])
+                    for c in coins
+                    if c['x_pubkeys'][0] not in pubkeys_missing_privkeys}
         self.add_coins(coindict, keypairs)
 
         coinstrs = set(t + ':' + str(i) for t,i in coindict)
@@ -601,9 +611,9 @@ class Fusion(threading.Thread, PrintError):
             # linkage somehow, which means throwing away some fixs as extra fees beyond
             # the minimum requirement.
 
-            # For now, just throw on a few unobtrusive extra fixs at the higher tiers, at most 9.
-            # TODO: smarter selection for high tiers (how much will users be comfortable paying?)
-            fuzz_fee_max = min(9, scale // 1000000)
+            # Just use (tier / 10^6) as fuzzing range. For a 10 XRG tier this means
+            # randomly overpaying fees of 0 to 1000 fix.
+            fuzz_fee_max = scale // 1000000
 
             ### End fuzzing fee range selection ###
 
@@ -616,9 +626,6 @@ class Fusion(threading.Thread, PrintError):
             assert fuzz_fee_max_reduced >= 0
             fuzz_fee = secrets.randbelow(fuzz_fee_max_reduced + 1)
             assert fuzz_fee <= fuzz_fee_max_reduced and fuzz_fee_max_reduced <= fuzz_fee_max
-
-            # TODO: this can be removed when the above is updated
-            assert fuzz_fee < 100, 'sanity check: example fuzz fee should be small'
 
             reduced_avail_for_outputs = avail_for_outputs - fuzz_fee
             if reduced_avail_for_outputs < offset_per_output:

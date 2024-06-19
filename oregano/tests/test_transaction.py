@@ -1,9 +1,9 @@
 import unittest
 from pprint import pprint
 
-from .. import transaction
+from .. import networks, serialize, token, transaction
 from ..address import Address, ScriptOutput, PublicKey
-from ..bitcoin import TYPE_ADDRESS, TYPE_PUBKEY, TYPE_SCRIPT
+from ..bitcoin import TYPE_ADDRESS, TYPE_PUBKEY, TYPE_SCRIPT, bfh
 
 from ..keystore import xpubkey_to_address
 
@@ -13,16 +13,17 @@ unsigned_blob = '010000000149f35e43fefd22d8bb9e4b3ff294c6286154c25712baf6ab77b64
 signed_blob = '010000000149f35e43fefd22d8bb9e4b3ff294c6286154c25712baf6ab77b646e5074d6aed010000006a473044022025bdc804c6fe30966f6822dc25086bc6bb0366016e68e880cf6efd2468921f3202200e665db0404f6d6d9f86f73838306ac55bb0d0f6040ac6047d4e820f24f46885412103b5bbebceeb33c1b61f649596b9c3611c6b2853a1f6b48bce05dd54f667fa2166feffffff0118e43201000000001976a914e158fb15c888037fdc40fb9133b4c1c3c688706488ac5fbd0700'
 v2_blob = "0200000001191601a44a81e061502b7bfbc6eaa1cef6d1e6af5308ef96c9342f71dbf4b9b5000000006b483045022100a6d44d0a651790a477e75334adfb8aae94d6612d01187b2c02526e340a7fd6c8022028bdf7a64a54906b13b145cd5dab21a26bd4b85d6044e9b97bceab5be44c2a9201210253e8e0254b0c95776786e40984c1aa32a7d03efa6bdacdea5f421b774917d346feffffff026b20fa04000000001976a914024db2e87dd7cfd0e5f266c5f212e21a31d805a588aca0860100000000001976a91421919b94ae5cefcdf0271191459157cdb41c4cbf88aca6240700"
 nonmin_blob = '010000000142b88360bd83813139af3a251922b7f3d2ac88e45a2a703c28db8ee8580dc3a300000000654c41151dc44bece88c5933d737176499209a0b1688d5eb51eb6f1fd9fcf2fb32d138c94b96a4311673b75a31c054210b2058735ce6c12e529ddea4a6b91e4a3786d94121034a29987f30ad5d23d79ed5215e034c51f6825bdb2aa595c2bdeb37902960b3d1feffffff012e030000000000001976a914480d1be8ab76f8cdd85ce4077f51d35b0baaa25a88ac4b521400'
+token_data_blob = '0200000002f9216e4d8853a41a9775a2542e91e549751403095471c16fb07209c9d63be650020000006a47304402204a76646d32f4ed675b11340b2f3502c197c5d52cfca0834709cf4e3374d45e950220153e8697ea1c02b403f8f45dc84c0924bd15a1b00c629135f1184df6ca1b29504121036f679d3562595fbe5c0a8a7194a2a8e476f2a094afc73a1dec817e2373b37f56fffffffff9216e4d8853a41a9775a2542e91e549751403095471c16fb07209c9d63be650000000006a47304402203080d4d635e32746094d7dc2ee5e448fdea75486965b419346b1e32a0e46f4740220276087388b4c98512ca5135f9e7914786c31f976861013f14df7f4487472673a412102abaad90841057ddb1ed929608b536535b0cd8a18ba0a90dba66ba7b1c1f7b4eaffffffff03a08601000000000044ef43c1044127e1274181e7458c70b02d5c75b49b31a337d85703d56480345cd2cc10ffffffffffffffff7f76a9140a373caf0ab3c2b46cd05625b8d545c295b93d7a88acf0e0ae2f000000001976a914ea873aaafbdd7a7c74d73ee1174e42f620b0a18c88aca08601000000000044ef43c1044127e1274181e7458c70b02d5c75b49b31a337d85703d56480345cd2cc6208596f596f596f212176a9140a373caf0ab3c2b46cd05625b8d545c295b93d7a88ac00000000'
 
 class TestBCDataStream(unittest.TestCase):
 
     def test_compact_size(self):
-        s = transaction.BCDataStream()
+        s = serialize.BCDataStream()
         values = [0, 1, 252, 253, 2**16-1, 2**16, 2**32-1, 2**32, 2**64-1]
         for v in values:
             s.write_compact_size(v)
 
-        with self.assertRaises(transaction.SerializationError):
+        with self.assertRaises(serialize.SerializationError):
             s.write_compact_size(-1)
 
         self.assertEqual(bh2u(s.input),
@@ -30,12 +31,12 @@ class TestBCDataStream(unittest.TestCase):
         for v in values:
             self.assertEqual(s.read_compact_size(), v)
 
-        with self.assertRaises(transaction.SerializationError):
+        with self.assertRaises(serialize.SerializationError):
             s.read_compact_size()
 
     def test_string(self):
-        s = transaction.BCDataStream()
-        with self.assertRaises(transaction.SerializationError):
+        s = serialize.BCDataStream()
+        with self.assertRaises(serialize.SerializationError):
             s.read_string()
 
         msgs = ['Hello', ' ', 'World', '', '!']
@@ -44,11 +45,11 @@ class TestBCDataStream(unittest.TestCase):
         for msg in msgs:
             self.assertEqual(s.read_string(), msg)
 
-        with self.assertRaises(transaction.SerializationError):
+        with self.assertRaises(serialize.SerializationError):
             s.read_string()
 
     def test_bytes(self):
-        s = transaction.BCDataStream()
+        s = serialize.BCDataStream()
         s.write(b'foobar')
         self.assertEqual(s.read_bytes(3), b'foo')
         self.assertEqual(s.read_bytes(2), b'ba')
@@ -68,11 +69,13 @@ class TestTransaction(unittest.TestCase):
                         'signatures': [None],
                         'type': 'p2pkh',
                         'value': 20112600,
-                        'x_pubkeys': ['ff0488b21e0000000000000000004f130d773e678a58366711837ec2e33ea601858262f8eaef246a7ebd19909c9a03c3b30e38ca7d797fee1223df1c9827b2a9f3379768f520910260220e0560014600002300']}],
+                        'x_pubkeys': ['ff0488b21e0000000000000000004f130d773e678a58366711837ec2e33ea601858262f8eaef246a7ebd19909c9a03c3b30e38ca7d797fee1223df1c9827b2a9f3379768f520910260220e0560014600002300'],
+                        'token_data': None}],
             'lockTime': 507231,
             'outputs': [{'address': Address.from_string('1MYXdf4moacvaEKZ57ozerpJ3t9xSeN6LK'),
                          'prevout_n': 0,
                          'scriptPubKey': '76a914e158fb15c888037fdc40fb9133b4c1c3c688706488ac',
+                         'token_data': None,
                          'type': 0,
                          'value': 20112408}],
             'version': 1}
@@ -115,6 +118,7 @@ class TestTransaction(unittest.TestCase):
             'outputs': [{'address': Address.from_string('1MYXdf4moacvaEKZ57ozerpJ3t9xSeN6LK'),
                          'prevout_n': 0,
                          'scriptPubKey': '76a914e158fb15c888037fdc40fb9133b4c1c3c688706488ac',
+                         'token_data': None,
                          'type': 0,
                          'value': 20112408}],
             'version': 1
@@ -129,6 +133,117 @@ class TestTransaction(unittest.TestCase):
         tx.update_signatures([expected['inputs'][0]['signatures'][0][:-2]])
 
         self.assertEqual(tx.estimated_size(), 191)
+
+    def test_tx_sort_bip69(self):
+        expected = {
+            'version': 2,
+            'inputs': [{'prevout_hash': '50e63bd6c90972b06fc171540903147549e5912e54a275971aa453884d6e21f9',
+                        'prevout_n': 2,
+                        'sequence': 4294967295,
+                        'address': Address.from_string('qp6xtxxxll97m7r2rulzc62ua4cgh65vz5vh88zkpp', net=networks.TestNet4),
+                        'x_pubkeys': ['036f679d3562595fbe5c0a8a7194a2a8e476f2a094afc73a1dec817e2373b37f56'],
+                        'pubkeys': ['036f679d3562595fbe5c0a8a7194a2a8e476f2a094afc73a1dec817e2373b37f56'],
+                        'signatures': ['304402204a76646d32f4ed675b11340b2f3502c197c5d52cfca0834709cf4e3374d45e950220153e8697ea1c02b403f8f45dc84c0924bd15a1b00c629135f1184df6ca1b295041'],
+                        'type': 'p2pkh',
+                        'num_sig': 1,
+                        'scriptSig': '47304402204a76646d32f4ed675b11340b2f3502c197c5d52cfca0834709cf4e3374d45e950220153e8697ea1c02b403f8f45dc84c0924bd15a1b00c629135f1184df6ca1b29504121036f679d3562595fbe5c0a8a7194a2a8e476f2a094afc73a1dec817e2373b37f56'},
+                       {'prevout_hash': '50e63bd6c90972b06fc171540903147549e5912e54a275971aa453884d6e21f9',
+                        'prevout_n': 0, 'sequence': 4294967295,
+                        'address': Address.from_string('qq9rw090p2eu9drv6ptztwx4ghpftwfa0gyqvlvx2q', net=networks.TestNet4),
+                        'x_pubkeys': ['02abaad90841057ddb1ed929608b536535b0cd8a18ba0a90dba66ba7b1c1f7b4ea'],
+                        'pubkeys': ['02abaad90841057ddb1ed929608b536535b0cd8a18ba0a90dba66ba7b1c1f7b4ea'],
+                        'signatures': ['304402203080d4d635e32746094d7dc2ee5e448fdea75486965b419346b1e32a0e46f4740220276087388b4c98512ca5135f9e7914786c31f976861013f14df7f4487472673a41'],
+                        'type': 'p2pkh',
+                        'num_sig': 1,
+                        'scriptSig': '47304402203080d4d635e32746094d7dc2ee5e448fdea75486965b419346b1e32a0e46f4740220276087388b4c98512ca5135f9e7914786c31f976861013f14df7f4487472673a412102abaad90841057ddb1ed929608b536535b0cd8a18ba0a90dba66ba7b1c1f7b4ea'}],
+            'outputs': [{'value': 100000, 'type': 0, 'address': Address.from_string('qq9rw090p2eu9drv6ptztwx4ghpftwfa0gyqvlvx2q', net=networks.TestNet4),
+                         'scriptPubKey': '76a9140a373caf0ab3c2b46cd05625b8d545c295b93d7a88ac',
+                         'token_data': token.OutputData(id=bfh('ccd25c348064d50357d837a3319bb4755c2db0708c45e7814127e1274104c143')[::-1],
+                                                        bitfield=0x10,
+                                                        amount=9223372036854775807,
+                                                        commitment=b''),
+                         'prevout_n': 0},
+                        {'value': 799990000,
+                         'type': 0,
+                         'address': Address.from_string('qr4gww42l0wh5lr56ulwz96wgtmzpv9p3sz4wxrydq', net=networks.TestNet4),
+                         'scriptPubKey': '76a914ea873aaafbdd7a7c74d73ee1174e42f620b0a18c88ac',
+                         'token_data': None,
+                         'prevout_n': 1},
+                        {'value': 100000,
+                         'type': 0,
+                         'address': Address.from_string('qq9rw090p2eu9drv6ptztwx4ghpftwfa0gyqvlvx2q', net=networks.TestNet4),
+                         'scriptPubKey': '76a9140a373caf0ab3c2b46cd05625b8d545c295b93d7a88ac',
+                         'token_data': token.OutputData(id=bfh('ccd25c348064d50357d837a3319bb4755c2db0708c45e7814127e1274104c143')[::-1],
+                                                        bitfield=0x62,
+                                                        amount=0,
+                                                        commitment=bfh('596f596f596f2121')),
+                         'prevout_n': 2}],
+            'lockTime': 0
+        }
+        tx = transaction.Transaction(token_data_blob)
+        deserialized = tx.deserialize()
+        self.assertEqual(deserialized, expected)
+        self.assertEqual(tx.deserialize(), None)
+        self.assertEqual(tx.as_dict(), {'hex': token_data_blob, 'complete': True, 'final': True})
+
+        self.assertEqual(tx.serialize(), token_data_blob)
+
+        expected_sorted = {
+            'version': 2,
+            'inputs': [{'prevout_hash': '50e63bd6c90972b06fc171540903147549e5912e54a275971aa453884d6e21f9',
+                        'prevout_n': 0, 'sequence': 4294967295,
+                        'address': Address.from_string('qq9rw090p2eu9drv6ptztwx4ghpftwfa0gyqvlvx2q', net=networks.TestNet4),
+                        'x_pubkeys': ['02abaad90841057ddb1ed929608b536535b0cd8a18ba0a90dba66ba7b1c1f7b4ea'],
+                        'pubkeys': ['02abaad90841057ddb1ed929608b536535b0cd8a18ba0a90dba66ba7b1c1f7b4ea'],
+                        'signatures': ['304402203080d4d635e32746094d7dc2ee5e448fdea75486965b419346b1e32a0e46f4740220276087388b4c98512ca5135f9e7914786c31f976861013f14df7f4487472673a41'],
+                        'type': 'p2pkh',
+                        'num_sig': 1,
+                        'scriptSig': '47304402203080d4d635e32746094d7dc2ee5e448fdea75486965b419346b1e32a0e46f4740220276087388b4c98512ca5135f9e7914786c31f976861013f14df7f4487472673a412102abaad90841057ddb1ed929608b536535b0cd8a18ba0a90dba66ba7b1c1f7b4ea'},
+                       {'prevout_hash': '50e63bd6c90972b06fc171540903147549e5912e54a275971aa453884d6e21f9',
+                        'prevout_n': 2,
+                        'sequence': 4294967295,
+                        'address': Address.from_string('qp6xtxxxll97m7r2rulzc62ua4cgh65vz5vh88zkpp', net=networks.TestNet4),
+                        'x_pubkeys': ['036f679d3562595fbe5c0a8a7194a2a8e476f2a094afc73a1dec817e2373b37f56'],
+                        'pubkeys': ['036f679d3562595fbe5c0a8a7194a2a8e476f2a094afc73a1dec817e2373b37f56'],
+                        'signatures': ['304402204a76646d32f4ed675b11340b2f3502c197c5d52cfca0834709cf4e3374d45e950220153e8697ea1c02b403f8f45dc84c0924bd15a1b00c629135f1184df6ca1b295041'],
+                        'type': 'p2pkh',
+                        'num_sig': 1,
+                        'scriptSig': '47304402204a76646d32f4ed675b11340b2f3502c197c5d52cfca0834709cf4e3374d45e950220153e8697ea1c02b403f8f45dc84c0924bd15a1b00c629135f1184df6ca1b29504121036f679d3562595fbe5c0a8a7194a2a8e476f2a094afc73a1dec817e2373b37f56'}
+                       ],
+            'outputs': [{'value': 100000,
+                         'type': 0,
+                         'address': Address.from_string('qq9rw090p2eu9drv6ptztwx4ghpftwfa0gyqvlvx2q', net=networks.TestNet4),
+                         'scriptPubKey': '76a9140a373caf0ab3c2b46cd05625b8d545c295b93d7a88ac',
+                         'token_data': token.OutputData(
+                             id=bfh('ccd25c348064d50357d837a3319bb4755c2db0708c45e7814127e1274104c143')[::-1],
+                             bitfield=0x62,
+                             amount=0,
+                             commitment="596f596f596f2121"),
+                         'prevout_n': 0},
+                         {'value': 100000,
+                          'type': 0,
+                          'address': Address.from_string('qq9rw090p2eu9drv6ptztwx4ghpftwfa0gyqvlvx2q', net=networks.TestNet4),
+                          'scriptPubKey': '76a9140a373caf0ab3c2b46cd05625b8d545c295b93d7a88ac',
+                          'token_data': token.OutputData(
+                              id='ccd25c348064d50357d837a3319bb4755c2db0708c45e7814127e1274104c143',
+                              bitfield="10",
+                              amount=9223372036854775807,
+                              commitment=b''),
+                          'prevout_n': 1},
+                        {'value': 799990000,
+                         'type': 0,
+                         'address': Address.from_string('qr4gww42l0wh5lr56ulwz96wgtmzpv9p3sz4wxrydq', net=networks.TestNet4),
+                         'scriptPubKey': '76a914ea873aaafbdd7a7c74d73ee1174e42f620b0a18c88ac',
+                         'token_data': None,
+                         'prevout_n': 2}
+                        ],
+            'lockTime': 0
+        }
+
+        tx.BIP69_sort()
+        tx = transaction.Transaction(tx.serialize())
+        deserialized = tx.deserialize()
+        self.assertEqual(deserialized, expected_sorted)
 
     def test_tx_nonminimal_scriptSig(self):
         # The nonminimal push is the '4c41...' (PUSHDATA1 length=0x41 [...]) at
@@ -148,6 +263,7 @@ class TestTransaction(unittest.TestCase):
             'outputs': [{'address': Address.from_pubkey('034a29987f30ad5d23d79ed5215e034c51f6825bdb2aa595c2bdeb37902960b3d1'),
                          'prevout_n': 0,
                          'scriptPubKey': '76a914480d1be8ab76f8cdd85ce4077f51d35b0baaa25a88ac',
+                         'token_data': None,
                          'type': 0,
                          'value': 814}],
             'version': 1

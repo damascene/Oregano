@@ -1,6 +1,10 @@
-PyQt5>=5.12.3
+PyQt5>=5.12.3,<=5.15.9
 pycryptodomex
 psutil
 
 # we need at least cryptography>=2.6 for dnspython[DNSSEC]
 cryptography>=2.6
+
+# For the QR code scanner
+# Version 2.2.0 added an interface that can be used without numpy
+zxing-cpp>=2.2.0

@@ -111,8 +111,8 @@ class TrezorPlugin(HW_PluginBase):
     libraries_URL = 'https://pypi.org/project/trezor/'
     minimum_firmware = (1, 5, 2)
     keystore_class = TrezorKeyStore
-    minimum_library = (0, 12, 0)
-    maximum_library = (0, 13)
+    minimum_library = (0, 13, 8)
+    maximum_library = (0, 14)
 
     DEVICE_IDS = (TREZOR_PRODUCT_KEY,)
 

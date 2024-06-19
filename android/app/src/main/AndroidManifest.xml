@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:tools="http://schemas.android.com/tools"
-    package="org.oregano.oregano3"
     xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.INTERNET"/>
 
     <application
@@ -26,11 +26,12 @@
             android:name=".ECConsoleActivity"
             android:label="@string/console"
             android:launchMode="singleInstance"/>
-        
+
         <activity
             android:name=".MainActivity"
             android:theme="@style/AppTheme.Splash"
-            android:launchMode="singleTask">
+            android:launchMode="singleTask"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
@@ -44,7 +45,9 @@
         </activity>
 
         <service
-            android:name=".CaptionService"/>
+            android:name=".CaptionService"
+            android:foregroundServiceType="dataSync"
+            />
 
         <!-- On some devices it forces landscape by default. -->
         <activity

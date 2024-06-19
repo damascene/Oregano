@@ -284,7 +284,7 @@ class MnemonicBase(PrintError):
     def mnemonic_to_seed(cls, mnemonic: str, passphrase: Optional[str]) -> bytes:
         raise NotImplementedError(f'mnemonic_to_seed is not implemented in {cls.__name__}')
 
-    def make_seed(self, seed_type=None, num_bits=128, custom_entropy=1) -> str:
+    def make_seed(self, seed_type=None, num_bits=128, custom_entropy=1, allow_ambiguous=False) -> str:
         raise NotImplementedError(f'make_seed is not implemented in {type(self).__name__}')
 
     @classmethod
@@ -340,7 +340,7 @@ class Mnemonic(MnemonicBase):
         passphrase = cls.normalize_text(passphrase or '', is_passphrase=True)
         return hashlib.pbkdf2_hmac('sha512', mnemonic.encode('utf-8'), b'mnemonic' + passphrase.encode('utf-8'), iterations = PBKDF2_ROUNDS)
 
-    def make_seed(self, seed_type=None, num_bits=128, custom_entropy=1) -> str:
+    def make_seed(self, seed_type=None, num_bits=128, custom_entropy=1, allow_ambiguous=False) -> str:
         if self.lang not in ('en', 'es'):
             raise NotImplementedError(f"Cannot make a seed for language '{self.lang}'. "
                                       + "Only English and Spanish are supported as seed generation languages in this implementation")
@@ -364,7 +364,7 @@ class Mnemonic(MnemonicBase):
             iters += 1
             seed = inner(num_bits)
             # avoid ambiguity between old-style seeds and BIP39, as well as avoid clashes with Electrum seeds
-            if autodetect_seed_type(seed, self.lang) == {SeedType.BIP39}:
+            if allow_ambiguous or autodetect_seed_type(seed, self.lang) == {SeedType.BIP39}:
                 self.print_error("make_seed iterations:", iters)
                 return seed
 
@@ -429,7 +429,7 @@ class Mnemonic_Electrum(MnemonicBase):
             i = i*n + k
         return i
 
-    def make_seed(self, seed_type=None, num_bits=132, custom_entropy=1):
+    def make_seed(self, seed_type=None, num_bits=132, custom_entropy=1, allow_ambiguous=False):
         """ Electrum format """
         if self.lang not in ('en', 'es', 'pt'):
             raise NotImplementedError(f"Cannot make a seed for language '{self.lang}'. "
@@ -455,7 +455,7 @@ class Mnemonic_Electrum(MnemonicBase):
             seed = self.mnemonic_encode(i)
             assert i == self.mnemonic_decode(seed)
             # avoid ambiguity between old-style seeds and new-style, as well as avoid clashes with BIP39 seeds
-            if autodetect_seed_type(seed, self.lang, prefix=prefix) == {SeedType.Electrum}:
+            if allow_ambiguous or autodetect_seed_type(seed, self.lang, prefix=prefix) == {SeedType.Electrum}:
                 break
         self.print_error('{nwords} words, {nonce} iterations'.format(nwords=len(seed.split()), nonce=nonce))
         return seed

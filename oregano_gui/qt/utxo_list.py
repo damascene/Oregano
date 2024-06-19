@@ -23,7 +23,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 from .util import *
-from oregano.i18n import _
+from oregano.i18n import _, ngettext
 from oregano.plugins import run_hook
 from oregano.address import Address
 from oregano.bitcoin import COINBASE_MATURITY
@@ -50,6 +50,7 @@ class UTXOList(MyTreeWidget):
         address      = Qt.UserRole + 2
         cash_account = Qt.UserRole + 3  # this may not always be there for a particular item
         slp_token    = Qt.UserRole + 4  # this is either a tuple of (token_id, qty) or None
+        cash_token   = Qt.UserRole + 5  # this is either a token.OutputData or None
 
     filter_columns = [Col.address, Col.label]
     default_sort = MyTreeWidget.SortSpec(Col.amount, Qt.DescendingOrder)  # sort by amount, descending
@@ -71,6 +72,8 @@ class UTXOList(MyTreeWidget):
         self.blue = ColorScheme.BLUE.as_color(True)
         self.cyanBlue = QColor('#3399ff')
         self.slpBG = ColorScheme.SLPGREEN.as_color(True)
+        self.cashTokenBG = QColor(self.slpBG)
+        self.cashTokenBG.setAlpha(0x77)
         self.immatureColor = ColorScheme.BLUE.as_color(False)
         self.output_point_prefix_text = columns[self.Col.output_point]
 
@@ -99,7 +102,7 @@ class UTXOList(MyTreeWidget):
     def get_name_short(self, x):
         return x.get('prevout_hash')[:10] + '...' + ":%d"%x.get('prevout_n')
 
-    @rate_limited(1.0, ts_after=True) # performance tweak -- limit updates to no more than oncer per second
+    @rate_limited(1.0, ts_after=True)  # performance tweak -- limit updates to no more than once per second
     def update(self):
         if self.cleaned_up:
             # short-cut return if window was closed and wallet is stopped
@@ -114,7 +117,7 @@ class UTXOList(MyTreeWidget):
         ca_by_addr = defaultdict(list)
         if self.show_cash_accounts:
             addr_set = set()
-            self.utxos = self.wallet.get_utxos(addr_set_out=addr_set, exclude_slp=False)
+            self.utxos = self.wallet.get_utxos(addr_set_out=addr_set, exclude_slp=False, exclude_tokens=False)
             # grab all cash accounts so that we may add the emoji char
             for info in self.wallet.cashacct.get_cashaccounts(addr_set):
                 ca_by_addr[info.address].append(info)
@@ -124,7 +127,7 @@ class UTXOList(MyTreeWidget):
                 del ca_list  # reference still exists inside ca_by_addr dict, this is just deleted here because we re-use this name below.
             del addr_set  # clean-up. We don't want the below code to ever depend on the existence of this cell.
         else:
-            self.utxos = self.wallet.get_utxos(exclude_slp=False)
+            self.utxos = self.wallet.get_utxos(exclude_slp=False, exclude_tokens=False)
         for x in self.utxos:
             address = x['address']
             address_text = address.to_ui_string()
@@ -157,6 +160,7 @@ class UTXOList(MyTreeWidget):
             c_frozen = x['is_frozen_coin']
             toolTipMisc = ''
             slp_token = x['slp_token']
+            cash_token = x['token_data']
             if is_immature:
                 for colNum in range(self.columnCount()):
                     if colNum == self.Col.label:
@@ -180,8 +184,13 @@ class UTXOList(MyTreeWidget):
                 utxo_item.setBackground(0, self.lightBlue)
                 utxo_item.setForeground(0, self.cyanBlue)
                 toolTipMisc = _("Coin & Address are frozen")
+            elif cash_token:
+                utxo_item.setBackground(0, self.cashTokenBG)
+                toolTipMisc = _('Coin contains a CashToken')
             # save the address-level-frozen and coin-level-frozen flags to the data item for retrieval later in create_menu() below.
-            utxo_item.setData(0, self.DataRoles.frozen_flags, "{}{}{}{}".format(("a" if a_frozen else ""), ("c" if c_frozen else ""), ("s" if slp_token else ""), ("i" if is_immature else "")))
+            utxo_item.setData(0, self.DataRoles.frozen_flags, "{}{}{}{}{}".format(
+                ("a" if a_frozen else ""), ("c" if c_frozen else ""), ("s" if slp_token else ""),
+                ("i" if is_immature else ""), ("t" if cash_token else "")))
             # store the address
             utxo_item.setData(0, self.DataRoles.address, address)
             # store the ca_info for this address -- if any
@@ -189,6 +198,8 @@ class UTXOList(MyTreeWidget):
                 utxo_item.setData(0, self.DataRoles.cash_account, ca_info)
             # store the slp_token
             utxo_item.setData(0, self.DataRoles.slp_token, slp_token)
+            # store the cash token
+            utxo_item.setData(0, self.DataRoles.cash_token, cash_token)
             if toolTipMisc:
                 utxo_item.setToolTip(0, toolTipMisc)
             run_hook("utxo_list_item_setup", self, utxo_item, x, name)
@@ -207,25 +218,36 @@ class UTXOList(MyTreeWidget):
                 output_point_text = self.output_point_prefix_text
             headerItem.setText(self.Col.output_point, output_point_text)
 
-
     def get_selected(self):
-        return { x.data(0, self.DataRoles.name) : x.data(0, self.DataRoles.frozen_flags) # dict of "name" -> frozen flags string (eg: "ac")
-                for x in self.selectedItems() }
+        # dict of "name" -> frozen flags string (eg: "ac")
+        return {x.data(0, self.DataRoles.name): x.data(0, self.DataRoles.frozen_flags)
+                for x in self.selectedItems()}
 
     @if_not_dead
     def create_menu(self, position):
         menu = QMenu()
         selected = self.get_selected()
+
         def create_menu_inner():
             if not selected:
                 return
-            coins = filter(lambda x: self.get_name(x) in selected, self.utxos)
+            coins = list(filter(lambda x: self.get_name(x) in selected, self.utxos))
             if not coins:
                 return
+            # Spendable coins are ones that have NO frozen_flags
             spendable_coins = list(filter(lambda x: not selected.get(self.get_name(x), ''), coins))
+            # Sendable cash tokens have only "frozen" flag 't'
+            sendable_cash_tokens = list(filter(lambda x: selected.get(self.get_name(x), '') == 't', coins))
             # Unconditionally add the "Spend" option but leave it disabled if there are no spendable_coins
             spend_action = menu.addAction(_("Spend"), lambda: self.parent.spend_coins(spendable_coins))
             spend_action.setEnabled(bool(spendable_coins))
+            if sendable_cash_tokens:
+                num_utxos = len(sendable_cash_tokens)
+                menu.addAction(QIcon(":icons/tab_send.png"),
+                               ngettext("Send Token", "Send Tokens", num_utxos)
+                               + (f" ({num_utxos})" if num_utxos > 1 else "") + "...",
+                               lambda: self.parent.send_tokens(sendable_cash_tokens))
+
             if len(selected) == 1:
                 # "Copy ..."
                 item = self.itemAt(position)
@@ -236,7 +258,9 @@ class UTXOList(MyTreeWidget):
                 column_title = self.headerItem().text(col)
                 alt_column_title, alt_copy_text = None, None
                 slp_token = item.data(0, self.DataRoles.slp_token)
+                cash_token = item.data(0, self.DataRoles.cash_token)
                 ca_info = None
+                token_text = None
                 if col == self.Col.output_point:
                     copy_text = item.data(0, self.DataRoles.name)
                 elif col == self.Col.address:
@@ -248,6 +272,9 @@ class UTXOList(MyTreeWidget):
                     else:
                         alt_copy_text, alt_column_title = addr.to_full_string(Address.FMT_LEGACY), _('Legacy Address')
                     ca_info = item.data(0, self.DataRoles.cash_account)  # may be None
+                    token_text = addr.to_full_token_string()
+                    if token_text in (copy_text, alt_copy_text):
+                        token_text = None
                     del addr
                 else:
                     copy_text = item.text(col)
@@ -256,6 +283,8 @@ class UTXOList(MyTreeWidget):
                 menu.addAction(_("Copy {}").format(column_title), lambda: QApplication.instance().clipboard().setText(copy_text))
                 if alt_copy_text and alt_column_title:
                     menu.addAction(_("Copy {}").format(alt_column_title), lambda: QApplication.instance().clipboard().setText(alt_copy_text))
+                if False:
+                    menu.addAction(_("Copy {}").format(_("Token Address")), lambda: QApplication.instance().clipboard().setText(token_text))
                 if ca_info:
                     self.wallet.cashacct.fmt_info(ca_info)  # paranoia: pre-cache minimal chash (may go out to network)
                     # menu.addAction(_("Copy Cash Account"), lambda: self.wallet and QApplication.instance().clipboard().setText(self.wallet.cashacct.fmt_info(ca_info, emoji=True)))

@@ -25,8 +25,8 @@
 
 from .util import *
 import oregano.web as web
-from oregano.i18n import _
-from oregano.util import timestamp_to_datetime, profiler, Weak
+from oregano.i18n import _, ngettext
+from oregano.util import timestamp_to_datetime, PrintError, profiler, Weak
 from oregano.plugins import run_hook
 
 
@@ -43,7 +43,8 @@ TX_ICONS = [
     "confirmed.svg",
 ]
 
-class HistoryList(MyTreeWidget):
+
+class HistoryList(MyTreeWidget, PrintError):
     filter_columns = [2, 3, 4]  # Date, Description, Amount
     filter_data_columns = [0]  # Allow search on tx_hash (string)
     statusIcons = {}
@@ -60,10 +61,14 @@ class HistoryList(MyTreeWidget):
         self.monospaceFont = QFont(MONOSPACE_FONT)
         self.withdrawalBrush = QBrush(QColor("#BC1E1E"))
         self.invoiceIcon = QIcon(":icons/seal")
+        self.cashTokensIcon = QIcon(":icons/tab_token.svg")
         self._item_cache = Weak.ValueDictionary()
         self.itemChanged.connect(self.item_changed)
 
         self.has_unknown_balances = False
+
+    def diagnostic_name(self):
+        return f"{super().diagnostic_name()}/{self.wallet.diagnostic_name()}"
 
     def clean_up(self):
         self.cleaned_up = True
@@ -103,7 +108,7 @@ class HistoryList(MyTreeWidget):
             self._item_cache[tx_hash] = item
 
     @classmethod
-    def _get_icon_for_status(cls, status):
+    def get_icon_for_status(cls, status):
         ret = cls.statusIcons.get(status)
         if not ret:
             cls.statusIcons[status] = ret = QIcon(":icons/" + TX_ICONS[status])
@@ -112,7 +117,8 @@ class HistoryList(MyTreeWidget):
     @profiler
     def on_update(self):
         self.wallet = self.parent.wallet
-        h = self.wallet.get_history(self.get_domain(), reverse=True)
+        h = self.wallet.get_history(self.get_domain(), reverse=True, receives_before_sends=True,
+                                    include_tokens=True, include_tokens_balances=False)
         sels = self.selectedItems()
         current_tx = sels[0].data(0, Qt.UserRole) if sels else None
         del sels #  make sure not to hold stale ref to C++ list of items which will be deleted in clear() call below
@@ -121,9 +127,9 @@ class HistoryList(MyTreeWidget):
         fx = self.parent.fx
         if fx: fx.history_used_spot = False
         for h_item in h:
-            tx_hash, height, conf, timestamp, value, balance = h_item
+            tx_hash, height, conf, timestamp, value, balance, token_deltas, token_balances = h_item
             label = self.wallet.get_label(tx_hash)
-            should_skip = run_hook("history_list_filter", self, h_item, label, multi=True) or []
+            should_skip = run_hook("history_list_filter", self, h_item[:6], label, multi=True) or []
             if any(should_skip):
                 # For implementation of fast plugin filters (such as CashShuffle
                 # shuffle tx filtering), we short-circuit return. This is
@@ -138,7 +144,7 @@ class HistoryList(MyTreeWidget):
                 self.has_unknown_balances = True
             status, status_str = self.wallet.get_tx_status(tx_hash, height, conf, timestamp)
             has_invoice = self.wallet.invoices.paid.get(tx_hash)
-            icon = self._get_icon_for_status(status)
+            icon = self.get_icon_for_status(status)
             v_str = self.parent.format_amount(value, True, whitespaces=True)
             balance_str = self.parent.format_amount(balance, whitespaces=True)
             entry = ['', tx_hash, status_str, label, v_str, balance_str]
@@ -153,6 +159,13 @@ class HistoryList(MyTreeWidget):
             item.setData(0, SortableTreeWidgetItem.DataRole, (status, conf))
             if has_invoice:
                 item.setIcon(3, self.invoiceIcon)
+            elif token_deltas:
+                item.setIcon(3, self.cashTokensIcon)
+                num = len(token_deltas)
+                item.setToolTip(3, ngettext("Transaction contains {num} CashToken category involving this wallet",
+                                            "Transaction contains {num} CashToken categories involving this wallet",
+                                            num).format(num=num))
+                item.setToolTip(2, item.toolTip(3))
             for i in range(len(entry)):
                 if i>3:
                     item.setTextAlignment(i, Qt.AlignRight | Qt.AlignVCenter)
@@ -161,6 +174,7 @@ class HistoryList(MyTreeWidget):
             if value and value < 0:
                 item.setForeground(3, self.withdrawalBrush)
                 item.setForeground(4, self.withdrawalBrush)
+                item.setForeground(6, self.withdrawalBrush)
             item.setData(0, Qt.UserRole, tx_hash)
             self.addTopLevelItem(item, tx_hash)
             if current_tx == tx_hash:
@@ -219,7 +233,7 @@ class HistoryList(MyTreeWidget):
                 was_cur = self.currentItem() is item
                 self.invisibleRootItem().takeChild(idx)
             status, status_str = self.wallet.get_tx_status(tx_hash, height, conf, timestamp)
-            icon = self._get_icon_for_status(status)
+            icon = self.get_icon_for_status(status)
             if icon: item.setIcon(0, icon)
             item.setData(0, SortableTreeWidgetItem.DataRole, (status, conf))
             item.setText(2, status_str)
