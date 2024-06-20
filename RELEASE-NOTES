@@ -1448,3 +1448,8 @@ and there is no warning message.
 - Add optional support for more advanced "Console" tab, enabled with -C when running from source (cculianu)
 - Add colon and help text to QR reader setting label #2838 (Axel Gembe)
 - Fix for macOS ARM segfault crash in darkdetect when running from source (cculianu, The00Dustin)
+
+# RELEASE NOTES 4.5.1
+- Fast forwarded the changes from Electron Cash
+- Disabled cashtokens in the interface
+- Reusable Payment Addresses now work!
